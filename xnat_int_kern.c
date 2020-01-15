@@ -9,95 +9,20 @@
 
 #include "bpf_helpers.h"
 #include "bpf_endian.h"
-// #include "stats_kern.h"
 #include "common.h"
-#include "parser.h"
-#include "nat_kern.h"
-#include "define_kern.h"
-#include "ifinfo.h"
-
 #include "printk.h"
+#include "define_kern.h"
+#include "stats_kern.h"
+#include "parser.h"
+#include "ifinfo.h"
+#include "nat_kern.h"
+#include "xnat_int_map.h"
 
 #ifndef lock_xadd
 #define lock_xadd(ptr, val) ((void) __sync_fetch_and_add(ptr, val))
 #endif
 
 #define MAX_ICMP_LEN 1500
-
-struct ether_arp {
-    __be16 ar_hrd;
-    __be16 ar_pro;
-    __u8 ar_hln;
-    __u8 ar_pln;
-    __be16 ar_op;
-    __u8 ar_sha[ETH_ALEN];
-    __u8 ar_sip[4];
-    __u8 ar_tha[ETH_ALEN];
-    __u8 ar_tip[4];
-};
-
-// #define PROG(F) SEC(#F) int bpf_func_##F
-
-// enum {
-//     ARP = 1,
-//     IP,
-//     IPV6,
-// };
-
-// struct bpf_map_def SEC("maps") prog_map = {
-//     .type        = BPF_MAP_TYPE_PROG_ARRAY,
-//     .key_size    = sizeof(__u32),
-//     .value_size  = sizeof(__u32),
-//     .max_entries = 8,
-// };
-
-union icmp_message {
-    __u8 data[100];
-    struct icmphdr icmp;
-};
-
-struct bpf_map_def SEC("maps") tx_map = {
-    .type        = BPF_MAP_TYPE_DEVMAP,
-    .key_size    = sizeof(__u32),
-    .value_size  = sizeof(__u32),
-    .max_entries = 50,
-};
-
-struct bpf_map_def SEC("maps") redirect_params = {
-    .type        = BPF_MAP_TYPE_HASH,
-    .key_size    = ETH_ALEN,
-    .value_size  = ETH_ALEN,
-    .max_entries = 50,
-};
-
-struct bpf_map_def SEC("maps") nat_map = {
-    .type        = BPF_MAP_TYPE_HASH,
-    .key_size    = sizeof(struct nm_k),
-    .value_size  = sizeof(struct nat_table),
-    .max_entries = 100,
-};
-
-struct bpf_map_def SEC("maps") if_map = {
-    .type        = BPF_MAP_TYPE_HASH,
-    .key_size    = sizeof(__u32),
-    .value_size  = sizeof(struct ifinfo),
-    .max_entries = 256,
-};
-
-struct bpf_map_def SEC("maps") port_pool_map = {
-    .type        = BPF_MAP_TYPE_HASH,
-    .key_size    = sizeof(__be16),
-    .value_size  = sizeof(__be16),
-    .max_entries = 60000,
-};
-
-struct bpf_map_def SEC("maps") freelist_map = {
-    .type        = BPF_MAP_TYPE_STACK,
-    .key_size    = 0,
-    .value_size  = sizeof(__be16),
-    .max_entries = 60000,
-    .map_flags   = 0,
-};
 
 static __always_inline __be16 get_icmp_id(struct hdr_cursor *nh,
                                           void *data_end,
@@ -548,8 +473,8 @@ int xdp_nat(struct xdp_md *ctx) {
 err:
     action = XDP_ABORTED;
 out:
-    // return stats(ctx, &stats_map, action);
-    return action;
+    return stats(ctx, &stats_map, action);
+    // return action;
 }
 
 // PROG(ARP)(struct xdp_md *ctx) {
