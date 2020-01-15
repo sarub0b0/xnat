@@ -23,7 +23,6 @@ struct icmphdr_common {
     __sum16 cksum;
 };
 
-
 struct vlan_hdr {
     __be16 h_vlan_TCI;
     __be16 h_vlan_encapsulated_proto;
@@ -34,19 +33,19 @@ static __always_inline int proto_is_vlan(__u16 h_proto) {
               h_proto == bpf_htons(ETH_P_8021AD));
 }
 
-static __always_inline int parse_ethhdr(struct hdr_cursor *nh,
-                                        void *data_end,
-                                        struct ethhdr **ethhdr) {
+static __always_inline __be16 parse_ethhdr(struct hdr_cursor *nh,
+                                           void *data_end,
+                                           struct ethhdr **ethhdr) {
 
-    struct ethhdr *h = nh->pos;
+    struct ethhdr *h = (struct ethhdr *) nh->pos;
     struct vlan_hdr *vlh;
-    __u16 h_proto;
+    __be16 h_proto;
 
     if (h + 1 > (struct ethhdr *) data_end) return -1;
 
     nh->pos = h + 1;
     *ethhdr = h;
-    vlh     = nh->pos;
+    vlh     = (struct vlan_hdr *) nh->pos;
     h_proto = h->h_proto;
 
 #pragma unroll
@@ -67,7 +66,7 @@ static __always_inline int parse_ip6hdr(struct hdr_cursor *nh,
                                         void *data_end,
                                         struct ipv6hdr **ip6hdr) {
 
-    struct ipv6hdr *h = nh->pos;
+    struct ipv6hdr *h = (struct ipv6hdr *) nh->pos;
 
     if (h + 1 > (struct ipv6hdr *) data_end) return -1;
 
@@ -79,7 +78,7 @@ static __always_inline int parse_ip6hdr(struct hdr_cursor *nh,
 static __always_inline int parse_iphdr(struct hdr_cursor *nh,
                                        void *data_end,
                                        struct iphdr **iphdr) {
-    struct iphdr *h = nh->pos;
+    struct iphdr *h = (struct iphdr *) nh->pos;
     int hdrsize;
 
     if (h + 1 > (struct iphdr *) data_end) return -1;
@@ -102,7 +101,7 @@ static __always_inline int parse_icmphdr(struct hdr_cursor *nh,
 
     if (h + 1 > (struct icmphdr *) data_end) return -1;
 
-    nh->pos  = (void *) h + 1;
+    nh->pos  = (struct icmphdr *) h + 1;
     *icmphdr = h;
 
     return h->type;

@@ -28,6 +28,7 @@
 
 const char *dev_name    = "xnat0";
 const char *pin_basedir = "/sys/fs/bpf";
+const char *sub_dir     = "xnat";
 
 struct bpf_prog_load_attr prog_load_attr = {
     .prog_type = BPF_PROG_TYPE_XDP,
@@ -48,6 +49,8 @@ int pin_maps_in_bpf_object(struct bpf_object *obj, const char *subdir) {
 
     bpf_map__for_each(map, obj) {
         const char *map_name = bpf_map__name(map);
+
+        info("map-name [%s]", map_name);
 
         map = bpf_object__find_map_by_name(obj, map_name);
         if (!map) {
@@ -100,7 +103,6 @@ int main(int argc, char const *argv[]) {
 
     fprintf(stdout, "if=%s/%d\n", dev_name, ifindex);
 
-
     if (bpf_set_link_xdp_fd(ifindex, prog_fd, 0) < 0) {
         fprintf(stderr,
                 "ERR: Can't attach to interface %s:%d\n",
@@ -109,7 +111,7 @@ int main(int argc, char const *argv[]) {
         return EXIT_FAIL_BPF;
     }
 
-    err = pin_maps_in_bpf_object(obj, dev_name);
+    err = pin_maps_in_bpf_object(obj, sub_dir);
     if (err) {
         return EXIT_FAIL_BPF;
     }

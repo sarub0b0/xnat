@@ -4,38 +4,41 @@
 
 #include "parser.h"
 
-static __always_inline __u16 icmp_checksum(__u16 seed,
-                                           struct icmphdr_common *new_icmphdr,
-                                           struct icmphdr_common *old_icmphdr) {
-    __u32 csum = 0;
-    __u32 size = sizeof(struct icmphdr_common);
-    csum       = bpf_csum_diff(old_icmphdr, size, new_icmphdr, size, seed);
-    return ~((csum & 0xffff) + (csum >> 16));
+static __always_inline __wsum generic_checksum(void *new,
+                                               void *old,
+                                               int size,
+                                               __wsum seed) {
+
+    __wsum csum = 0;
+
+    csum = bpf_csum_diff(old, size, new, size, ~seed);
+
+    csum = (csum & 0xffff) + (csum >> 16);
+    csum = (csum & 0xffff) + (csum >> 16);
+
+    return ~csum;
 }
 
-static __always_inline int ip_checksum(struct iphdr *iph) {
+static __always_inline __u32 rfc1071_checksum(void *hdr, int size) {
     // RFC 1071
     // int checksum(unsigned short *buf, int bufsize) {
-    int sum    = 0;
-    iph->check = 0;
+    __u32 sum = 0;
+    // iph->check = 0;
 
-    __u16 *buf  = (__u16 *) iph;
-    int bufsize = sizeof(*iph);
+    __u16 *buf  = (__u16 *) hdr;
+    int bufsize = size;
 
     while (bufsize > 1) {
         sum += *buf++;
         bufsize -= 2;
     }
 
-    // if (bufsize > 0) {
-    //     sum += *(__u8 *) buf;
-    // }
+    if (bufsize > 0) {
+        sum += *(__u8 *) buf;
+    }
 
     sum = (sum & 0xffff) + (sum >> 16);
-    sum = (sum & 0xffff) + (sum >> 16);
-
-    iph->check = ~sum;
-    return 0;
+    return ~((sum & 0xffff) + (sum >> 16));
 }
 
 #endif /* end of include guard */
