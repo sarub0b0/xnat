@@ -4,6 +4,18 @@
 
 #include "parser.h"
 
+struct ether_arp {
+    __be16 ar_hrd;
+    __be16 ar_pro;
+    __u8 ar_hln;
+    __u8 ar_pln;
+    __be16 ar_op;
+    __u8 ar_sha[ETH_ALEN];
+    __u8 ar_sip[4];
+    __u8 ar_tha[ETH_ALEN];
+    __u8 ar_tip[4];
+};
+
 static __always_inline __wsum generic_checksum(void *new,
                                                void *old,
                                                int size,
