@@ -1,6 +1,7 @@
 
 CC := clang
-CFLAGS := -O2 -target bpf -Wall
+CFLAGS := -O2 -target bpf -Wall -DDEBUG
+# CFLAGS := -g -target bpf -Wall
 
 all: xnat_int_kern xnat_ext_kern stats loader loader_int loader_ext xnat_int_user
 
@@ -32,6 +33,9 @@ loader_ext:
 	$(CC) loader_ext.c -o loader_ext -lbpf
 .PHONY: loader_ext
 
+
+clean:
+	-rm stats loader loader_int loader_ext *.o
 
 
 

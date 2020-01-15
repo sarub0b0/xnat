@@ -9,4 +9,8 @@
 #define memcpy(dst, src, n) __builtin_memcpy((dst), (src), (n))
 #endif
 
+#ifndef memset
+#define memset(dst, value, len) __builtin_memset((dst), (value), (len))
+#endif
+
 #endif /* end of include guard */
