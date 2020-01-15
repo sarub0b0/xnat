@@ -12,11 +12,14 @@
 #include <errno.h>
 #include <locale.h>
 #include <arpa/inet.h>
+#include <sys/ioctl.h>
+#include <net/if.h>
 
 #include "stats.h"
 #include "message.h"
 #include "utils.h"
 #include "nat.h"
+#include "ifinfo.h"
 
 const char *pin_basedir        = "/sys/fs/bpf";
 const char *tx_map_name        = "tx_map";
@@ -24,11 +27,62 @@ const char *redirect_map_name  = "redirect_params";
 const char *nat_map_name       = "nat_map";
 const char *port_pool_map_name = "port_pool_map";
 const char *freelist_map_name  = "freelist_map";
+const char *if_map_name        = "if_map";
 
 const char *i_ifname = "xnat0";
 const char *e_ifname = "xnat1";
 
 const char *sub_dir = "xnat";
+
+int register_ifinfo(int map_fd, int ifindex, const char *ifname) {
+
+    int err;
+
+    int sock;
+    struct ifreq ifreq;
+
+    sock = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sock < 0) {
+        return -1;
+    }
+
+    strcpy(ifreq.ifr_name, ifname);
+
+    err = ioctl(sock, SIOCGIFHWADDR, &ifreq);
+    if (err < 0) {
+        close(sock);
+        return -1;
+    }
+
+    struct ifinfo info;
+    memcpy(info.mac, ifreq.ifr_hwaddr.sa_data, ETH_ALEN);
+
+    err = ioctl(sock, SIOCGIFADDR, &ifreq);
+    if (err < 0) {
+        close(sock);
+        return -1;
+    }
+
+    struct sockaddr_in saddr;
+    memcpy(&saddr, &ifreq.ifr_addr, sizeof(saddr));
+
+    memcpy(&info.ip, &saddr.sin_addr, 4);
+
+    info("ifindex(%d) addr(0x%x) mac(%02x:%02x:%02x:%02x:%02x:%02x)",
+         ifindex,
+         ntohl(info.ip),
+         // (uint32_t) ifreq.ifr_addr.sa_data,
+         info.mac[0],
+         info.mac[1],
+         info.mac[2],
+         info.mac[3],
+         info.mac[4],
+         info.mac[5]);
+
+    bpf_map_update_elem(map_fd, &ifindex, &info, 0);
+
+    return 0;
+}
 
 int main(int argc, char const *argv[]) {
 
@@ -39,6 +93,7 @@ int main(int argc, char const *argv[]) {
     int nat_map_fd;
     int port_pool_map_fd;
     int freelist_map_fd;
+    int if_map_fd;
     int len;
 
     uint32_t i_ifindex, e_ifindex;
@@ -90,6 +145,17 @@ int main(int argc, char const *argv[]) {
     if (nat_map_fd < 0) {
         fprintf(stderr, "ERR: bpf_map__fd failed. [%s]\n", nat_map_name);
         return EXIT_FAIL_BPF;
+    }
+
+    if_map_fd = open_bpf_map_file(pin_dir, if_map_name, &info);
+    if (if_map_fd < 0) {
+        fprintf(stderr, "ERR: bpf_map__fd failed. [%s]\n", if_map_name);
+        return EXIT_FAIL_BPF;
+    }
+
+    if (if_map_fd) {
+        register_ifinfo(if_map_fd, i_ifindex, i_ifname);
+        register_ifinfo(if_map_fd, e_ifindex, e_ifname);
     }
 
     if (redirect_map_fd) {
