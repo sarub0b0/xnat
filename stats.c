@@ -16,7 +16,7 @@
 #include "utils.h"
 
 const char *map_name    = "stats_map";
-const char *dev_name    = "xnat0";
+const char *dev_name    = "xnat";
 const char *pin_basedir = "/sys/fs/bpf";
 
 const char *xdp_action_names[XDP_ACTION_MAX] = {

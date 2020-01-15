@@ -9,6 +9,8 @@
 #include <linux/tcp.h>
 #include <linux/udp.h>
 
+#include "bpf_endian.h"
+
 #ifndef VLAN_MAX_DEPTH
 #define VLAN_MAX_DEPTH 4
 #endif
@@ -85,10 +87,11 @@ static __always_inline int parse_iphdr(struct hdr_cursor *nh,
 
     hdrsize = h->ihl * 4;
 
-    if (nh->pos + hdrsize > data_end) return -1;
+    __u8 *pos = (__u8 *) nh->pos;
+    if (pos + hdrsize > (__u8 *) data_end) return -1;
 
-    nh->pos += hdrsize;
-    *iphdr = h;
+    nh->pos = (__u8 *) nh->pos + hdrsize;
+    *iphdr  = h;
 
     return h->protocol;
 }
@@ -97,7 +100,7 @@ static __always_inline int parse_icmphdr(struct hdr_cursor *nh,
                                          void *data_end,
                                          struct icmphdr **icmphdr) {
 
-    struct icmphdr *h = nh->pos;
+    struct icmphdr *h = (struct icmphdr *) nh->pos;
 
     if (h + 1 > (struct icmphdr *) data_end) return -1;
 
@@ -109,7 +112,7 @@ static __always_inline int parse_icmphdr(struct hdr_cursor *nh,
 static __always_inline int parse_icmphdr_common(
     struct hdr_cursor *nh, void *data_end, struct icmphdr_common **icmphdr) {
 
-    struct icmphdr_common *h = nh->pos;
+    struct icmphdr_common *h = (struct icmphdr_common *) nh->pos;
 
     if (h + 1 > (struct icmphdr_common *) data_end) return -1;
 
