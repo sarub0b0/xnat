@@ -214,7 +214,7 @@ int main(int argc, char *const *argv) {
 
                 set_objname = 1;
                 break;
-            case 's':
+            case 'd':
                 len = snprintf(cfg.sub_dir, PATH_MAX, "%s", optarg);
                 if (len < 0) {
                     return EXIT_FAIL_OPTION;
