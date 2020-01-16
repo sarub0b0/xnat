@@ -52,13 +52,11 @@ Mkfile.old
 dkms.conf
 
 
-xnat_int_user
-xnat_int_kern
-xnat_ext_user
-xnat_ext_kern
-stats
 loader
-loader_int
-loader_ext
+xnat_user
+xnat_kern
+stats
 
-
+GPATH
+GRTAGS
+GTAGS
