@@ -170,8 +170,11 @@ static void stats_collect(int map_fd,
     }
 }
 
-static void stats_poll(int map_fd, uint32_t map_type, int interval) {
-    struct stats_record prev, record = {0};
+static int stats_poll(
+    const char *pin_dir, int map_fd, int id, uint32_t map_type, int interval) {
+
+    struct bpf_map_info info = {};
+    struct stats_record prev, record = {};
 
     setlocale(LC_NUMERIC, "en_US");
 
@@ -180,6 +183,16 @@ static void stats_poll(int map_fd, uint32_t map_type, int interval) {
 
     while (1) {
         prev = record;
+
+        map_fd = open_bpf_map_file(pin_dir, map_name, &info);
+        if (map_fd < 0) {
+            return EXIT_FAIL_BPF;
+        } else if (id != info.id) {
+            info("BPF map %s changed its ID, restarting\n", map_name);
+            close(map_fd);
+            return 0;
+        }
+
         stats_collect(map_fd, map_type, &record);
         stats_print(&record, &prev);
         sleep(interval);
@@ -192,6 +205,7 @@ int main(int argc, char const *argv[]) {
     struct bpf_map_info info = {0};
     int map_fd;
     int len;
+    int err;
 
     len = snprintf(pin_dir, PATH_MAX, "%s/%s", pin_basedir, dev_name);
     if (len < 0) {
@@ -199,25 +213,30 @@ int main(int argc, char const *argv[]) {
         return EXIT_FAIL_OPTION;
     }
 
-    map_fd = open_bpf_map_file(pin_dir, map_name, &info);
-    if (map_fd < 0) {
-        fprintf(stderr, "ERR: bpf_map__fd failed. [%s]\n", map_name);
-        return EXIT_FAIL_BPF;
-    }
-
-    printf("\nCollecting stats from BPF map\n");
-    printf(
-        " - BPF map (bpf_map_type:%d) id:%d name:%s key_size:%d value_size:%d "
-        "max_entries:%d\n",
-        info.type,
-        info.id,
-        info.name,
-        info.key_size,
-        info.value_size,
-        info.max_entries);
-
     int interval = 2;
-    stats_poll(map_fd, info.type, interval);
+    while (1) {
+        map_fd = open_bpf_map_file(pin_dir, map_name, &info);
+        if (map_fd < 0) {
+            fprintf(stderr, "ERR: bpf_map__fd failed. [%s]\n", map_name);
+            return EXIT_FAIL_BPF;
+        }
 
+        printf("\nCollecting stats from BPF map\n");
+        printf(
+            " - BPF map (bpf_map_type:%d) id:%d name:%s key_size:%d "
+            "value_size:%d "
+            "max_entries:%d\n",
+            info.type,
+            info.id,
+            info.name,
+            info.key_size,
+            info.value_size,
+            info.max_entries);
+
+        err = stats_poll(pin_dir, map_fd, info.id, info.type, interval);
+        if (err < 0) {
+            return err;
+        }
+    }
     return EXIT_OK;
 }
