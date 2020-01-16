@@ -27,11 +27,11 @@
 #endif
 
 const char *pin_basedir = "/sys/fs/bpf";
-// char *internal_progsec = "xnat/internal";
-// char *external_progsec = "xnat/external";
+char *internal_progsec = "xnat/internal";
+char *external_progsec = "xnat/external";
 
-char *internal_progsec = "pass";
-char *external_progsec = "drop";
+//char *internal_progsec = "pass";
+//char *external_progsec = "drop";
 
 struct config {
     // __u32 xdp_flags;
