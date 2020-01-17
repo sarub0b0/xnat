@@ -16,12 +16,10 @@
 #include "parser.h"
 #include "ifinfo.h"
 #include "nat.h"
-
-#ifndef lock_xadd
-#define lock_xadd(ptr, val) ((void) __sync_fetch_and_add(ptr, val))
-#endif
-
-#define MAX_ICMP_LEN 1500
+// #include "eth.h"
+// #include "icmp.h"
+// #include "ipv4.h"
+// #include "fib.h"
 
 // #define PROG(F) SEC(#F) int bpf_func_##F
 
@@ -37,7 +35,7 @@
 //     .value_size  = sizeof(__u32),
 //     .max_entries = 8,
 // };
-
+//
 struct bpf_map_def SEC("maps") tx_map = {
     .type        = BPF_MAP_TYPE_DEVMAP,
     .key_size    = sizeof(__u32),
@@ -55,7 +53,7 @@ struct bpf_map_def SEC("maps") redirect_params = {
 struct bpf_map_def SEC("maps") nat_map = {
     .type        = BPF_MAP_TYPE_HASH,
     .key_size    = sizeof(struct nm_k),
-    .value_size  = sizeof(struct nat_table),
+    .value_size  = sizeof(struct nat_info),
     .max_entries = 100,
 };
 
@@ -70,7 +68,7 @@ struct bpf_map_def SEC("maps") port_pool_map = {
     .type        = BPF_MAP_TYPE_HASH,
     .key_size    = sizeof(__be16),
     .value_size  = sizeof(__be16),
-    .max_entries = 60000,
+    .max_entries = 65536,
 };
 
 struct bpf_map_def SEC("maps") freelist_map = {
@@ -80,6 +78,135 @@ struct bpf_map_def SEC("maps") freelist_map = {
     .max_entries = 60000,
     .map_flags   = 0,
 };
+
+static __always_inline void _print_fib(struct bpf_fib_lookup *fib) {
+    bpf_printk("\n");
+    bpf_printk("==== fib info ====\n");
+    bpf_printk("family(%d)\n", fib->family);
+    bpf_printk("tos 0x%x)\n", fib->tos);
+    bpf_printk("protocol(0x%x)\n", fib->l4_protocol);
+    bpf_printk("tot_len(0x%x)\n", fib->tot_len);
+    bpf_printk("src(0x%x)\n", bpf_ntohl(fib->ipv4_src));
+    bpf_printk("dst(0x%x)\n", bpf_ntohl(fib->ipv4_dst));
+    bpf_printk("sport(0x%x)\n", fib->sport);
+    bpf_printk("dport(0x%x)\n", fib->dport);
+    bpf_printk("smac(%x:%x:%x:)\n", fib->smac[0], fib->smac[1], fib->smac[2]);
+    bpf_printk("smac(%x:%x:%x:)\n", fib->smac[3], fib->smac[4], fib->smac[5]);
+    bpf_printk("dmac(%x:%x:%x:)\n", fib->dmac[0], fib->dmac[1], fib->dmac[2]);
+    bpf_printk("dmac(%x:%x:%x:)\n", fib->dmac[3], fib->dmac[4], fib->dmac[5]);
+    bpf_printk("ifindex(%d)\n", fib->ifindex);
+
+    bpf_printk("\n");
+}
+
+static __always_inline void _print_net_info(struct nm_k *key,
+                                            struct nat_info *nat) {
+    bpf_printk("\n");
+    bpf_printk("==== nat table ====\n");
+    bpf_printk(
+        "\taddr=0x%x port=%d\n", bpf_ntohl(key->addr), bpf_ntohs(key->port));
+    bpf_printk("\tingress_ifindex (%d)\n", nat->ingress_ifindex);
+    bpf_printk("\tegress_ifindex(%d)\n", nat->egress_ifindex);
+    bpf_printk("\tsrc addr(0x%x)\n", bpf_ntohl(nat->saddr));
+    bpf_printk("\tdst addr(0x%x)\n", bpf_ntohl(nat->daddr));
+    bpf_printk("\tsrc port(%d)\n", bpf_ntohs(nat->sport));
+    bpf_printk("\tdst port(%d)\n", bpf_ntohs(nat->dport));
+    bpf_printk("\tproto(0x%x)\n", nat->proto);
+    bpf_printk("\tnew addr(0x%x)\n", bpf_ntohl(nat->new_addr));
+    bpf_printk("\tnew port(%d)\n", bpf_ntohs(nat->new_port));
+
+    bpf_printk("\n");
+}
+
+static __always_inline void set_fib(struct iphdr *iph,
+                                    struct bpf_fib_lookup *fib) {
+
+    fib->family      = AF_INET;
+    fib->tos         = iph->tos;
+    fib->l4_protocol = iph->protocol;
+    fib->sport       = 0;
+    fib->dport       = 0;
+    fib->tot_len     = bpf_ntohs(iph->tot_len);
+    fib->ipv4_src    = iph->saddr;
+    fib->ipv4_dst    = iph->daddr;
+}
+
+static __always_inline int fib_lookup(struct xdp_md *ctx,
+                                      struct bpf_fib_lookup *fib) {
+    int rc;
+    rc = bpf_fib_lookup(ctx, fib, sizeof(*fib), BPF_FIB_LOOKUP_OUTPUT);
+
+    bpf_printk("bpf_fib_lookup return code(%d)\n", rc);
+    switch (rc) {
+        case BPF_FIB_LKUP_RET_SUCCESS:
+            return XDP_REDIRECT;
+        case BPF_FIB_LKUP_RET_BLACKHOLE:
+            bpf_printk("BPF_FIB_LKUP_RET_BLACKHOLE\n");
+            return XDP_DROP;
+        case BPF_FIB_LKUP_RET_UNREACHABLE:
+            return XDP_DROP;
+            bpf_printk("BPF_FIB_LKUP_RET_UNREACHABLE\n");
+            return XDP_DROP;
+        case BPF_FIB_LKUP_RET_PROHIBIT:
+            bpf_printk("BPF_FIB_LKUP_RET_PROHIBIT\n");
+            return XDP_DROP;
+        case BPF_FIB_LKUP_RET_NOT_FWDED:
+            bpf_printk("BPF_FIB_LKUP_RET_NOT_FWDED\n");
+            return XDP_PASS;
+        case BPF_FIB_LKUP_RET_FWD_DISABLED:
+            bpf_printk("BPF_FIB_LKUP_RET_FWD_DISABLED\n");
+            return XDP_PASS;
+        case BPF_FIB_LKUP_RET_UNSUPP_LWT:
+            bpf_printk("BPF_FIB_LKUP_RET_UNSUPP_LWT\n");
+            return XDP_PASS;
+        case BPF_FIB_LKUP_RET_NO_NEIGH:
+            bpf_printk("BPF_FIB_LKUP_RET_NO_NEIGH\n");
+            return XDP_PASS;
+        case BPF_FIB_LKUP_RET_FRAG_NEEDED:
+            bpf_printk("BPF_FIB_LKUP_RET_FRAG_NEEDED\n");
+            // pass
+            return XDP_PASS;
+    }
+    return rc;
+}
+
+static __always_inline int update_eth(struct ethhdr *eth,
+                                      struct nat_info *nat) {
+    unsigned char *dst;
+    unsigned char *src;
+
+    memcpy(nat->seth, eth->h_source, ETH_ALEN);
+    memcpy(nat->deth, eth->h_dest, ETH_ALEN);
+
+    dst = bpf_map_lookup_elem(&redirect_params, eth->h_source);
+    if (!dst) {
+        bpf_printk("ERR: lookup source mac failed\n");
+        return -1;
+    }
+
+    memcpy(eth->h_dest, dst, ETH_ALEN);
+
+    src = bpf_map_lookup_elem(&redirect_params, eth->h_dest);
+    if (!src) {
+        bpf_printk("ERR: lookup dest mac failed\n");
+        return -1;
+    }
+
+    memcpy(eth->h_source, src, ETH_ALEN);
+
+    return 0;
+}
+static __always_inline int update_ipv4_checksum(struct iphdr *old,
+                                                struct iphdr *new) {
+    __sum16 old_csum;
+
+    old_csum   = old->check;
+    old->check = 0;
+    new->check = 0;
+
+    new->check = generic_checksum(new, old, sizeof(struct iphdr), old_csum);
+    return 0;
+}
 
 static __always_inline __be16 get_icmp_id(struct hdr_cursor *nh,
                                           void *data_end,
@@ -113,8 +240,8 @@ static __always_inline __be16 update_icmp_id(struct icmphdr *hdr,
     return 0;
 }
 
-static __always_inline __u32 update_icmp_checksum(struct icmphdr *old_hdr,
-                                                  struct icmphdr *new_hdr) {
+static __always_inline int update_icmp_checksum(struct icmphdr *old_hdr,
+                                                struct icmphdr *new_hdr) {
 
     __sum16 old_csum;
 
@@ -127,19 +254,6 @@ static __always_inline __u32 update_icmp_checksum(struct icmphdr *old_hdr,
 
     return 0;
 }
-
-static __always_inline __u32 update_ipv4_checksum(struct iphdr *old,
-                                                  struct iphdr *new) {
-    __sum16 old_csum;
-
-    old_csum   = old->check;
-    old->check = 0;
-    new->check = 0;
-
-    new->check = generic_checksum(new, old, sizeof(struct iphdr), old_csum);
-    return 0;
-}
-
 static __always_inline __be16 get_new_port(__be16 port_pool_key) {
     int err;
     __be16 *find_port;
@@ -172,10 +286,9 @@ static __always_inline __be16 get_new_port(__be16 port_pool_key) {
 
     return free_port;
 }
-
-static __always_inline __u32 update_icmp(struct hdr_cursor *nh,
-                                         void *data_end,
-                                         struct nat_table *nt) {
+static __always_inline int update_icmp(struct hdr_cursor *nh,
+                                       void *data_end,
+                                       struct nat_info *nat) {
     struct icmphdr *icmphdr;
     struct icmphdr old_icmphdr;
 
@@ -187,13 +300,13 @@ static __always_inline __u32 update_icmp(struct hdr_cursor *nh,
 
     old_icmphdr = *icmphdr;
 
-    nt->proto    = IPPROTO_ICMP;
-    nt->sport    = get_icmp_id(nh, data_end, &icmphdr);
-    nt->dport    = 0;
-    nt->new_port = get_new_port(nt->sport);
+    nat->proto    = IPPROTO_ICMP;
+    nat->sport    = get_icmp_id(nh, data_end, &icmphdr);
+    nat->dport    = 0;
+    nat->new_port = get_new_port(nat->sport);
 
-    if (nt->new_port > 0) {
-        update_icmp_id(icmphdr, nt->new_port);
+    if (nat->new_port > 0) {
+        update_icmp_id(icmphdr, nat->new_port);
 
         update_icmp_checksum(&old_icmphdr, icmphdr);
 
@@ -210,241 +323,88 @@ static __always_inline __u32 update_icmp(struct hdr_cursor *nh,
     return 0;
 }
 
-static __always_inline __u32 update_ipv4(struct hdr_cursor *nh,
-                                         void *data_end,
-                                         struct nat_table *nt) {
-    struct iphdr *iph;
+static __always_inline int update_ipv4(struct iphdr *iph,
+                                       __u32 ifindex,
+                                       struct nat_info *nat) {
     struct iphdr old_iphdr;
-
-    iph = nh->pos;
-
-    if (iph + 1 > (struct iphdr *) data_end) {
-        return -1;
-    }
-    nh->pos = iph + 1;
-
-    // TODO プロトコル判別してポート書き換える
-    switch (iph->protocol) {
-        case IPPROTO_ICMP:
-            if (update_icmp(nh, data_end, nt) < 0) {
-                bpf_printk("ERR: update_icmp\n");
-                return -1;
-            }
-            break;
-        case IPPROTO_UDP:
-            // bpf_printk("IPPROTO_UDP\n");
-            nt->proto = IPPROTO_UDP;
-            break;
-        case IPPROTO_TCP:
-            // bpf_printk("IPPROTO_TCP\n");
-            nt->proto = IPPROTO_TCP;
-            break;
-    }
+    struct ifinfo *info;
 
     old_iphdr = *iph;
 
-    nt->saddr = iph->saddr;
-    nt->daddr = iph->daddr;
+    nat->saddr = iph->saddr;
+    nat->daddr = iph->daddr;
 
-    iph->saddr = bpf_htonl(0xc0a80101);
-    iph->daddr = bpf_htonl(0xc0a80102);
+    info = bpf_map_lookup_elem(&if_map, &ifindex);
+    if (!info) {
+        return -1;
+    }
 
-    nt->new_addr = iph->saddr;
+    nat->new_addr = info->ip;
+    iph->saddr    = info->ip;
 
     update_ipv4_checksum(&old_iphdr, iph);
 
     return 0;
 }
 
-static __always_inline __u32 update_eth(struct ethhdr *eth,
-                                        struct nat_table *nt) {
-    unsigned char *dst;
-    unsigned char *src;
+static __always_inline int update_l4(struct hdr_cursor *nh,
+                                     void *data_end,
+                                     __u8 l4_protocol,
+                                     struct nat_info *nat) {
 
-    memcpy(nt->seth, eth->h_source, ETH_ALEN);
-    memcpy(nt->deth, eth->h_dest, ETH_ALEN);
-
-    dst = bpf_map_lookup_elem(&redirect_params, eth->h_source);
-    if (!dst) {
-        bpf_printk("ERR: lookup source mac failed\n");
-        return -1;
+    switch (l4_protocol) {
+        case IPPROTO_ICMP:
+            if (update_icmp(nh, data_end, nat) < 0) {
+                return -1;
+            }
+            break;
+        case IPPROTO_UDP:
+            break;
+        case IPPROTO_TCP:
+            break;
     }
-
-    memcpy(eth->h_dest, dst, ETH_ALEN);
-
-    src = bpf_map_lookup_elem(&redirect_params, eth->h_dest);
-    if (!src) {
-        bpf_printk("ERR: lookup dest mac failed\n");
-        return -1;
-    }
-
-    memcpy(eth->h_source, src, ETH_ALEN);
-
     return 0;
 }
-// static __always_inline void err_map_update(int err, int flags) {
-//     bpf_printk("ERR: ");
-//     switch (err) {
-//         case E2BIG:
-//             bpf_printk("the map reached the max entries limit");
-//             break;
-//         case EEXIST:
-//             bpf_printk("the element with key already exists in the map");
-//             break;
-//         case ENOENT:
-//             bpf_printk("the element with key doesn't exist in the map");
-//             break;
-//     }
-//     switch (flags) {
-//         case BPF_ANY:
-//             bpf_printk(" flags(BPF_ANY)\n");
-//             break;
-//         case BPF_EXIST:
-//             bpf_printk(" flags(BPF_EXIST)\n");
-//             break;
-//         case BPF_NOEXIST:
-//             bpf_printk(" flags(BPF_NOEXIST)\n");
-//             break;
-//     }
-// }
 
-// static __always_inline __u32 arp_request() {
-// }
+static __always_inline int next_hop_lookup(struct xdp_md *ctx,
+                                           struct bpf_fib_lookup *fib) {
 
-static __always_inline __u32 proxy_arp(struct hdr_cursor *nh,
-                                       void *data_end,
-                                       struct ethhdr *eth,
-                                       __u32 ingress_ifindex) {
-
-    int action = XDP_PASS;
-
-    struct ether_arp *arphdr = nh->pos;
-    bpf_printk("hdr len %d\n", data_end - nh->pos);
-    bpf_printk("arphdr len %d\n", sizeof(struct arphdr));
-    bpf_printk("ether_arp len %d\n", sizeof(struct ether_arp));
-    bpf_printk("__be32 len %d\n", sizeof(__be32));
-
-    bpf_printk("data_end %p\n", data_end);
-    bpf_printk("pos1 %p\n", (struct arphdr *) (nh->pos + 1));
-    bpf_printk("pos2 %p\n", (struct ether_arp *) (arphdr + 1));
-
-    if (arphdr + 1 > (struct ether_arp *) data_end) {
-        return -1;
-    }
-    // TODO arp header書き換える
-
-    arphdr->ar_hrd = bpf_htons(ARPHRD_ETHER);
-    arphdr->ar_pro = bpf_htons(0x0800);
-    arphdr->ar_hln = ETH_ALEN;
-    arphdr->ar_pln = 4;
-    arphdr->ar_op  = bpf_htons(ARPOP_REQUEST);
-
-    __u32 *egress_ifindex;
-
-    egress_ifindex = bpf_map_lookup_elem(&tx_map, &ingress_ifindex);
-    if (!egress_ifindex) {
-        bpf_printk("ERR: lookup egress ifindex failed\n");
-        return -1;
-    }
-
-    bpf_printk("egress_ifindex(%d)\n", *egress_ifindex);
-
-    struct ifinfo *info;
-    info = bpf_map_lookup_elem(&if_map, egress_ifindex);
-    if (!info) {
-        bpf_printk("ERR: lookup source mac failed\n");
-        return -1;
-    }
-
-    memcpy(arphdr->ar_sha, info->mac, ETH_ALEN);
-    memcpy(arphdr->ar_sip, &info->ip, sizeof(info->ip));
-
-    memset(arphdr->ar_tha, 0x00, ETH_ALEN);
-
-    bpf_printk("\n");
-    bpf_printk("==== arp header ====\n");
-    bpf_printk("\thardware address(0x%x)\n", arphdr->ar_hrd);
-    bpf_printk("\tprotocol address(0x%x)\n", bpf_ntohs(arphdr->ar_pro));
-    bpf_printk("\tlengeth of hardware address(%d)\n", arphdr->ar_hln);
-    bpf_printk("\tlengeth of protocol address(%d)\n", arphdr->ar_pln);
-    bpf_printk("\topcode(0x%x)\n", arphdr->ar_op);
-
-    bpf_printk("\tsender ha(%x:%x:%x)\n",
-               arphdr->ar_sha[0],
-               arphdr->ar_sha[1],
-               arphdr->ar_sha[2]);
-    bpf_printk("\tsender ha(%x:%x:%x)\n",
-               arphdr->ar_sha[3],
-               arphdr->ar_sha[4],
-               arphdr->ar_sha[5]);
-
-    bpf_printk("\tsender ip(%d.%d)\n", arphdr->ar_sip[0], arphdr->ar_sip[1]);
-    bpf_printk("\tsender ip(.%d.%d)\n", arphdr->ar_sip[2], arphdr->ar_sip[3]);
-
-    bpf_printk("\ttarget ha(%x:%x:%x)\n",
-               arphdr->ar_tha[0],
-               arphdr->ar_tha[1],
-               arphdr->ar_tha[2]);
-    bpf_printk("\ttarget ha(%x:%x:%x)\n",
-               arphdr->ar_tha[3],
-               arphdr->ar_tha[4],
-               arphdr->ar_tha[5]);
-
-    bpf_printk("\ttarget ip(%d.%d)\n", arphdr->ar_tip[0], arphdr->ar_tip[1]);
-    bpf_printk("\ttarget ip(.%d.%d)\n", arphdr->ar_tip[2], arphdr->ar_tip[3]);
-
-    memcpy(eth->h_source, info->mac, ETH_ALEN);
-    memset(eth->h_dest, 0xff, ETH_ALEN);
-
-    bpf_printk("src mac(%x:%x:%x:)\n",
-               eth->h_source[0],
-               eth->h_source[1],
-               eth->h_source[2]);
-    bpf_printk("src mac(%x:%x:%x)\n",
-               eth->h_source[3],
-               eth->h_source[4],
-               eth->h_source[5]);
-    bpf_printk(
-        "dst mac(%x:%x:%x:)\n", eth->h_dest[0], eth->h_dest[1], eth->h_dest[2]);
-    bpf_printk(
-        "dst mac(%x:%x:%x)\n", eth->h_dest[3], eth->h_dest[4], eth->h_dest[5]);
-
-    action = bpf_redirect_map(&tx_map, ingress_ifindex, 0);
-
-    bpf_printk("action(%d)\n", action);
-
-    return action;
+    return fib_lookup(ctx, fib);
 }
 
-static __always_inline __u32 update_nat_map(struct nat_table *nt,
-                                            struct nm_k *key) {
-
-    int err = -1;
-    err     = bpf_map_update_elem(&nat_map, key, nt, BPF_NOEXIST);
-    if (err < 0) {
-        return -1;
-    }
-    return err;
+static __always_inline int update_nat_map(struct nat_info *nat,
+                                          struct nm_k *key) {
+    return bpf_map_update_elem(&nat_map, key, nat, BPF_NOEXIST);
 }
 
-SEC("prog")
-int xdp_nat(struct xdp_md *ctx) {
+SEC("xnat/ingress")
+int xnat_ingress(struct xdp_md *ctx) {
 
-    struct nat_table nt = {0};
+    struct nat_info nat = {0};
 
     void *data     = (void *) (long) ctx->data;
     void *data_end = (void *) (long) ctx->data_end;
     struct hdr_cursor nh;
 
-    __u32 ifindex;
+    __u32 ingress_ifindex;
 
     int err;
 
     int action = XDP_PASS;
     int flags  = 0;
 
-    nh.pos  = data;
-    ifindex = ctx->ingress_ifindex;
+    nh.pos              = data;
+    ingress_ifindex     = ctx->ingress_ifindex;
+    nat.ingress_ifindex = ingress_ifindex;
+
+    __u32 *egress_ifindex;
+    egress_ifindex = bpf_map_lookup_elem(&tx_map, &ingress_ifindex);
+    if (!egress_ifindex) {
+        bpf_printk("ERR: lookup egress ifindex failed\n");
+        goto err;
+    } else {
+        nat.egress_ifindex = *egress_ifindex;
+    }
 
     struct ethhdr *eth;
     __be16 h_proto;
@@ -461,62 +421,60 @@ int xdp_nat(struct xdp_md *ctx) {
 
     bpf_printk("INFO: eth proto=0x%x\n", bpf_ntohs(h_proto));
 
+    __u8 l4_protocol;
+    struct iphdr *iph;
+    struct bpf_fib_lookup fib = {};
+
+    l4_protocol = 0;
     switch (bpf_ntohs(h_proto)) {
         case ETH_P_ARP:
-            bpf_printk("ETH_P_ARP\n");
-            // if (proxy_arp(&nh, data_end, eth, ifindex) == XDP_REDIRECT) {
-            //     goto out;
-            // }
-            // bpf_printk("ERR: proxy arp failed\n");
             goto out;
         case ETH_P_IP:
-            bpf_printk("ETH_P_IP\n");
-            if (update_ipv4(&nh, data_end, &nt) < 0) {
+            iph = nh.pos;
+            if (iph + 1 > (struct iphdr *) data_end) goto err;
+            nh.pos = iph + 1;
+
+            l4_protocol = iph->protocol;
+
+            fib.ifindex = *egress_ifindex;
+            set_fib(iph, &fib);
+            int rc = next_hop_lookup(ctx, &fib);
+            if (rc != XDP_REDIRECT) {
+                action = rc;
+                goto out;
+            }
+            _print_fib(&fib);
+
+            if (update_ipv4(iph, *egress_ifindex, &nat) < 0) {
                 bpf_printk("ERR: update_ipv4 failed\n");
                 goto err;
             }
+
+            break;
+        case ETH_P_IPV6:
             break;
         default:
             bpf_printk("Default\n");
             goto out;
     }
 
+    if (update_l4(&nh, data_end, l4_protocol, &nat) < 0) {
+        bpf_printk("ERR: update_l4 failed\n");
+        goto err;
+    }
+
     bpf_printk("update_eth\n");
-    if (update_eth(eth, &nt) < 0) {
+    if (update_eth(eth, &nat) < 0) {
         bpf_printk("ERR: update_eth failed\n");
         goto err;
     }
-    __u32 *egress_ifindex;
-
-    egress_ifindex = bpf_map_lookup_elem(&tx_map, &ifindex);
-    if (!egress_ifindex) {
-        bpf_printk("ERR: lookup egress ifindex failed\n");
-        goto err;
-    } else {
-        nt.egress_ifindex = *egress_ifindex;
-    }
-    nt.ingress_ifindex = ifindex;
-
     struct nm_k key;
-    key.addr = nt.saddr;
-    key.port = nt.new_port;
+    key.addr = nat.new_addr;
+    key.port = nat.new_port;
 
-    bpf_printk("\n");
-    bpf_printk("==== nat table ====\n");
-    bpf_printk(
-        "\taddr=0x%x port=%d\n", bpf_ntohl(key.addr), bpf_ntohs(key.port));
-    bpf_printk("\tingress_ifindex (%d)\n", nt.ingress_ifindex);
-    bpf_printk("\tegress_ifindex(%d)\n", nt.egress_ifindex);
-    bpf_printk("\tsrc addr(0x%x)\n", bpf_ntohl(nt.saddr));
-    bpf_printk("\tdst addr(0x%x)\n", bpf_ntohl(nt.daddr));
-    bpf_printk("\tsrc port(%d)\n", bpf_ntohs(nt.sport));
-    bpf_printk("\tdst port(%d)\n", bpf_ntohs(nt.dport));
-    bpf_printk("\tproto(0x%x)\n", nt.proto);
-    bpf_printk("\tnew addr(0x%x)\n", bpf_ntohl(nt.new_addr));
-    bpf_printk("\tnew port(%d)\n", bpf_ntohs(nt.new_port));
-    bpf_printk("\n");
+    _print_net_info(&key, &nat);
 
-    err = update_nat_map(&nt, &key);
+    err = update_nat_map(&nat, &key);
     if (err) {
         bpf_printk("ERR: Exist nat table. key addr(0x%x) port(%d)\n",
                    bpf_ntohl(key.addr),
@@ -524,7 +482,7 @@ int xdp_nat(struct xdp_md *ctx) {
         // goto err;
     }
 
-    action = bpf_redirect_map(&tx_map, ifindex, flags);
+    action = bpf_redirect_map(&tx_map, ingress_ifindex, flags);
 
     goto out;
 err:
@@ -532,6 +490,18 @@ err:
 out:
     return stats(ctx, &stats_map, action);
     // return action;
+}
+
+SEC("xnat/egress")
+int xnat_egress(struct xdp_md *ctx) {
+    int action = XDP_PASS;
+    goto out;
+err:
+    action = XDP_ABORTED;
+out:
+    // return action;
+
+    return stats(ctx, &stats_map, action);
 }
 
 // PROG(ARP)(struct xdp_md *ctx) {

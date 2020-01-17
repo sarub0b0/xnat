@@ -87,11 +87,10 @@ static __always_inline int parse_iphdr(struct hdr_cursor *nh,
 
     hdrsize = h->ihl * 4;
 
-    __u8 *pos = (__u8 *) nh->pos;
-    if (pos + hdrsize > (__u8 *) data_end) return -1;
+    if (nh->pos + hdrsize > data_end) return -1;
 
-    nh->pos = (__u8 *) nh->pos + hdrsize;
-    *iphdr  = h;
+    nh->pos += hdrsize;
+    *iphdr = h;
 
     return h->protocol;
 }
