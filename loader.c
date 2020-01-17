@@ -27,11 +27,11 @@
 #endif
 
 const char *pin_basedir = "/sys/fs/bpf";
-char *internal_progsec = "xnat/internal";
-char *external_progsec = "xnat/external";
+char *ingress_progsec   = "xnat/ingress";
+char *egress_progsec    = "xnat/egress";
 
-//char *internal_progsec = "pass";
-//char *external_progsec = "drop";
+// char *ingress_progsec = "pass";
+// char *egress_progsec = "drop";
 
 struct config {
     // __u32 xdp_flags;
@@ -48,8 +48,8 @@ struct config {
     // char dest_mac[18];
     char sub_dir[PATH_MAX];
     char obj_name[PATH_MAX];
-    char internal_devname[DEV_MAX];
-    char external_devname[DEV_MAX];
+    char ingress_devname[DEV_MAX];
+    char egress_devname[DEV_MAX];
 };
 
 struct bpf_prog_load_attr prog_load_attr = {
@@ -71,8 +71,8 @@ void usage(void) {
     printf("Usage: ./loader [options] (root permission)\n");
     printf("\n");
     printf("  Required options:\n");
-    printf("    --int-dev, -i: internal device name\n");
-    printf("    --ext-dev, -e: external device name\n");
+    printf("    --int-dev, -i: ingress device name\n");
+    printf("    --ext-dev, -e: egress device name\n");
     printf("    --obj,     -o: xdp object name\n");
     printf("    --sub-dir, -d: pininng map sub dir [base=/sys/fs/bpf]\n");
     printf("\n");
@@ -90,7 +90,7 @@ int link_attach(struct config *cfg,
 
     ifindex = if_nametoindex(devname);
     if (!ifindex) {
-        info("ERR: unknown internal interface %s", devname);
+        info("ERR: unknown ingress interface %s", devname);
         return EXIT_FAIL_OPTION;
     }
 
@@ -110,7 +110,7 @@ int link_attach(struct config *cfg,
 
     if (bpf_set_link_xdp_fd(ifindex, prog_fd, 0) < 0) {
         info("ERR: Can't attach to interface %s:%d",
-             cfg->internal_devname,
+             cfg->ingress_devname,
              ifindex);
         return EXIT_FAIL_BPF;
     }
@@ -192,14 +192,14 @@ int main(int argc, char *const *argv) {
            -1) {
         switch (c) {
             case 'i':
-                len = snprintf(cfg.internal_devname, PATH_MAX, "%s", optarg);
+                len = snprintf(cfg.ingress_devname, PATH_MAX, "%s", optarg);
                 if (len < 0) {
                     return EXIT_FAIL_OPTION;
                 }
                 set_devname++;
                 break;
             case 'e':
-                len = snprintf(cfg.external_devname, PATH_MAX, "%s", optarg);
+                len = snprintf(cfg.egress_devname, PATH_MAX, "%s", optarg);
                 if (len < 0) {
                     return EXIT_FAIL_OPTION;
                 }
@@ -231,12 +231,12 @@ int main(int argc, char *const *argv) {
     }
 
     if (set_subdir != 1 || set_objname != 1 || set_devname != 2) {
-        err("Set internal devname, external devname, objname, subdir");
+        err("Set ingress devname, egress devname, objname, subdir");
         return EXIT_FAIL;
     }
 
-    info("Internal device(%s)", cfg.internal_devname);
-    info("External device(%s)", cfg.external_devname);
+    info("Ingress device(%s)", cfg.ingress_devname);
+    info("Egress device(%s)", cfg.egress_devname);
 
     int prog_fd;
     prog_load_attr.file = cfg.obj_name;
@@ -245,12 +245,12 @@ int main(int argc, char *const *argv) {
         return EXIT_FAIL_BPF;
     }
 
-    err = link_attach(&cfg, &obj, internal_progsec, cfg.internal_devname);
+    err = link_attach(&cfg, &obj, ingress_progsec, cfg.ingress_devname);
     if (err > 0) {
         return EXIT_FAIL_BPF;
     }
 
-    err = link_attach(&cfg, &obj, external_progsec, cfg.external_devname);
+    err = link_attach(&cfg, &obj, egress_progsec, cfg.egress_devname);
     if (err > 0) {
         return EXIT_FAIL_BPF;
     }
