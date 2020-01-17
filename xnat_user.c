@@ -231,7 +231,7 @@ int main(int argc, char const *argv[]) {
     int err;
     while (1) {
         uint16_t port;
-        struct nat_table nt     = {0};
+        struct nat_info nt      = {0};
         struct nm_k nt_key      = {0};
         struct nm_k nt_prev_key = {0};
 
