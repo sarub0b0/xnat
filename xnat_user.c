@@ -210,7 +210,7 @@ int main(int argc, char const *argv[]) {
         info(" - Initialize port-pool map");
         uint16_t v   = 0;
         uint16_t key = 0;
-        for (uint16_t i = 1024; i < 61024; i++) {
+        for (uint16_t i = 0; i < 65535; i++) {
             key = htons(i);
             bpf_map_update_elem(port_pool_map_fd, &key, &v, BPF_ANY);
         }
