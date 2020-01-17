@@ -11,7 +11,7 @@ struct bpf_map_def SEC("maps") stats_map = {
     .max_entries = XDP_ACTION_MAX,
 };
 
-static __always_inline __u32 stats(struct xdp_md *ctx,
+static __always_inline int stats(struct xdp_md *ctx,
                                    struct bpf_map_def *map,
                                    __u32 action) {
 

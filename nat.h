@@ -10,7 +10,7 @@ struct nm_k {
     __be16 port;
 } __attribute__((packed));
 
-struct nat_table {
+struct nat_info {
     __u16 ingress_ifindex;
     __u16 egress_ifindex;
     __u8 seth[ETH_ALEN];
@@ -22,7 +22,7 @@ struct nat_table {
     __be16 proto;
     __be32 new_addr;
     __be16 new_port;
-// };
-}__attribute__ ((packed, aligned(2)));
+    // };
+} __attribute__((packed, aligned(2)));
 
 #endif /* end of include guard */
