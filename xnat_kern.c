@@ -132,38 +132,40 @@ static __always_inline void set_fib(struct iphdr *iph,
 }
 
 static __always_inline int fib_lookup(struct xdp_md *ctx,
-                                      struct bpf_fib_lookup *fib) {
+                                      struct bpf_fib_lookup *fib,
+                                      __u32 flags) {
     int rc;
-    rc = bpf_fib_lookup(ctx, fib, sizeof(*fib), BPF_FIB_LOOKUP_OUTPUT);
+    rc = bpf_fib_lookup(ctx, fib, sizeof(*fib), flags);
 
-    bpf_printk("bpf_fib_lookup return code(%d)\n", rc);
+    bpf_printk("INFO: bpf_fib_lookup return code(%d)\n", rc);
     switch (rc) {
         case BPF_FIB_LKUP_RET_SUCCESS:
+            bpf_printk("\tBPF_FIB_LKUP_RET_SUCCESS\n");
             return XDP_REDIRECT;
         case BPF_FIB_LKUP_RET_BLACKHOLE:
-            bpf_printk("BPF_FIB_LKUP_RET_BLACKHOLE\n");
+            bpf_printk("\tBPF_FIB_LKUP_RET_BLACKHOLE\n");
             return XDP_DROP;
         case BPF_FIB_LKUP_RET_UNREACHABLE:
             return XDP_DROP;
-            bpf_printk("BPF_FIB_LKUP_RET_UNREACHABLE\n");
+            bpf_printk("\tBPF_FIB_LKUP_RET_UNREACHABLE\n");
             return XDP_DROP;
         case BPF_FIB_LKUP_RET_PROHIBIT:
-            bpf_printk("BPF_FIB_LKUP_RET_PROHIBIT\n");
+            bpf_printk("\tBPF_FIB_LKUP_RET_PROHIBIT\n");
             return XDP_DROP;
         case BPF_FIB_LKUP_RET_NOT_FWDED:
-            bpf_printk("BPF_FIB_LKUP_RET_NOT_FWDED\n");
+            bpf_printk("\tBPF_FIB_LKUP_RET_NOT_FWDED\n");
             return XDP_PASS;
         case BPF_FIB_LKUP_RET_FWD_DISABLED:
-            bpf_printk("BPF_FIB_LKUP_RET_FWD_DISABLED\n");
+            bpf_printk("\tBPF_FIB_LKUP_RET_FWD_DISABLED\n");
             return XDP_PASS;
         case BPF_FIB_LKUP_RET_UNSUPP_LWT:
-            bpf_printk("BPF_FIB_LKUP_RET_UNSUPP_LWT\n");
+            bpf_printk("\tBPF_FIB_LKUP_RET_UNSUPP_LWT\n");
             return XDP_PASS;
         case BPF_FIB_LKUP_RET_NO_NEIGH:
-            bpf_printk("BPF_FIB_LKUP_RET_NO_NEIGH\n");
+            bpf_printk("\tBPF_FIB_LKUP_RET_NO_NEIGH\n");
             return XDP_PASS;
         case BPF_FIB_LKUP_RET_FRAG_NEEDED:
-            bpf_printk("BPF_FIB_LKUP_RET_FRAG_NEEDED\n");
+            bpf_printk("\tBPF_FIB_LKUP_RET_FRAG_NEEDED\n");
             // pass
             return XDP_PASS;
     }
@@ -171,28 +173,29 @@ static __always_inline int fib_lookup(struct xdp_md *ctx,
 }
 
 static __always_inline int update_eth(struct ethhdr *eth,
+                                      struct bpf_fib_lookup *fib,
                                       struct nat_info *nat) {
-    unsigned char *dst;
-    unsigned char *src;
+    // unsigned char *dst;
+    // unsigned char *src;
 
     memcpy(nat->seth, eth->h_source, ETH_ALEN);
     memcpy(nat->deth, eth->h_dest, ETH_ALEN);
 
-    dst = bpf_map_lookup_elem(&redirect_params, eth->h_source);
-    if (!dst) {
-        bpf_printk("ERR: lookup source mac failed\n");
-        return -1;
-    }
+    // dst = bpf_map_lookup_elem(&redirect_params, eth->h_source);
+    // if (!dst) {
+    //     bpf_printk("ERR: lookup source mac failed\n");
+    //     return -1;
+    // }
 
-    memcpy(eth->h_dest, dst, ETH_ALEN);
+    memcpy(eth->h_dest, fib->dmac, ETH_ALEN);
 
-    src = bpf_map_lookup_elem(&redirect_params, eth->h_dest);
-    if (!src) {
-        bpf_printk("ERR: lookup dest mac failed\n");
-        return -1;
-    }
+    // src = bpf_map_lookup_elem(&redirect_params, eth->h_dest);
+    // if (!src) {
+    //     bpf_printk("ERR: lookup dest mac failed\n");
+    //     return -1;
+    // }
 
-    memcpy(eth->h_source, src, ETH_ALEN);
+    memcpy(eth->h_source, fib->smac, ETH_ALEN);
 
     return 0;
 }
@@ -245,12 +248,36 @@ static __always_inline int update_icmp_checksum(struct icmphdr *old_hdr,
 
     __sum16 old_csum;
 
-    old_csum          = old_hdr->checksum;
+    old_csum = old_hdr->checksum;
+
     old_hdr->checksum = 0;
     new_hdr->checksum = 0;
 
     new_hdr->checksum =
         generic_checksum(new_hdr, old_hdr, sizeof(struct icmphdr), old_csum);
+
+    return 0;
+}
+
+static __always_inline int update_udp_checksum(struct udphdr *old,
+                                               struct udphdr *new) {
+    __sum16 old_csum;
+    old_csum   = old->check;
+    old->check = 0;
+    new->check = 0;
+
+    new->check = generic_checksum(new, old, sizeof(struct udphdr), old_csum);
+
+    return 0;
+}
+static __always_inline int update_tcp_checksum(struct tcphdr *old,
+                                               struct tcphdr *new) {
+    __sum16 old_csum;
+    old_csum   = old->check;
+    old->check = 0;
+    new->check = 0;
+
+    new->check = generic_checksum(new, old, sizeof(struct tcphdr), old_csum);
 
     return 0;
 }
@@ -367,9 +394,10 @@ static __always_inline int update_l4(struct hdr_cursor *nh,
 }
 
 static __always_inline int next_hop_lookup(struct xdp_md *ctx,
-                                           struct bpf_fib_lookup *fib) {
+                                           struct bpf_fib_lookup *fib,
+                                           __u32 flags) {
 
-    return fib_lookup(ctx, fib);
+    return fib_lookup(ctx, fib, flags);
 }
 
 static __always_inline int update_nat_map(struct nat_info *nat,
@@ -377,37 +405,170 @@ static __always_inline int update_nat_map(struct nat_info *nat,
     return bpf_map_update_elem(&nat_map, key, nat, BPF_NOEXIST);
 }
 
+static __always_inline int egress_get_icmp_id(struct hdr_cursor *nh,
+                                              void *data_end,
+                                              __be16 *port) {
+
+    struct icmphdr *icmph = nh->pos;
+    if (icmph + 1 > (struct icmphdr *) data_end) {
+        return -1;
+    }
+
+    *port = icmph->un.echo.id;
+
+    return 0;
+}
+static __always_inline int egress_get_udp_port(struct hdr_cursor *nh,
+                                               void *data_end,
+                                               __be16 *port) {
+
+    struct udphdr *udphdr = nh->pos;
+    if (udphdr + 1 > (struct udphdr *) data_end) {
+        return -1;
+    }
+    *port = udphdr->dest;
+    return 0;
+}
+
+static __always_inline int egress_get_tcp_port(struct hdr_cursor *nh,
+                                               void *data_end,
+                                               __be16 *port) {
+    struct tcphdr *hdr = nh->pos;
+    if (hdr + 1 > (struct tcphdr *) data_end) {
+        return -1;
+    }
+    *port = hdr->dest;
+    return 0;
+}
+
+static __always_inline int get_l4_port(struct hdr_cursor *nh,
+                                       void *data_end,
+                                       __u8 protocol,
+                                       __be16 *port) {
+
+    switch (protocol) {
+        case IPPROTO_ICMP:
+            if (egress_get_icmp_id(nh, data_end, port) < 0) {
+                return -1;
+            }
+            break;
+        case IPPROTO_TCP:
+            if (egress_get_tcp_port(nh, data_end, port) < 0) {
+                return -1;
+            }
+            break;
+        case IPPROTO_UDP:
+            if (egress_get_udp_port(nh, data_end, port) < 0) {
+                return -1;
+            }
+            break;
+    }
+
+    return 0;
+}
+
+static __always_inline int egress_update_icmp(struct hdr_cursor *nh,
+                                              void *data_end,
+                                              __be16 port) {
+    struct icmphdr *hdr;
+    struct icmphdr old_hdr;
+    hdr = nh->pos;
+    if (hdr + 1 > (struct icmphdr *) data_end) {
+        return -1;
+    }
+
+    old_hdr = *hdr;
+
+    hdr->un.echo.id = port;
+
+    // チェックサム更新
+    update_icmp_checksum(&old_hdr, hdr);
+    return 0;
+}
+
+static __always_inline int egress_update_tcp(struct hdr_cursor *nh,
+                                             void *data_end,
+                                             __be16 port) {
+    struct tcphdr *new = nh->pos;
+    struct tcphdr old;
+    if (new + 1 > (struct tcphdr *) data_end) {
+        return -1;
+    }
+
+    old       = *new;
+    new->dest = port;
+
+    update_tcp_checksum(&old, new);
+    return 0;
+}
+static __always_inline int egress_update_udp(struct hdr_cursor *nh,
+                                             void *data_end,
+                                             __be16 port) {
+    struct udphdr *new = nh->pos;
+    struct udphdr old;
+    if (new + 1 > (struct udphdr *) data_end) {
+        return -1;
+    }
+
+    old       = *new;
+    new->dest = port;
+
+    update_udp_checksum(&old, new);
+    return 0;
+}
+
+static __always_inline int egress_update_l4(struct hdr_cursor *nh,
+                                            void *data_end,
+                                            __u8 protocol,
+                                            __be16 port) {
+
+    switch (protocol) {
+        case IPPROTO_ICMP:
+            if (egress_update_icmp(nh, data_end, port) < 0) {
+                return -1;
+            }
+            break;
+        case IPPROTO_UDP:
+            if (egress_update_udp(nh, data_end, port) < 0) {
+                return -1;
+            }
+            break;
+        case IPPROTO_TCP:
+            if (egress_update_tcp(nh, data_end, port) < 0) {
+                return -1;
+            }
+            break;
+    }
+    return 0;
+}
+
 SEC("xnat/ingress")
 int xnat_ingress(struct xdp_md *ctx) {
-
     struct nat_info nat = {0};
 
     void *data     = (void *) (long) ctx->data;
     void *data_end = (void *) (long) ctx->data_end;
     struct hdr_cursor nh;
+    struct ethhdr *eth;
 
     __u32 ingress_ifindex;
-
+    __u32 *egress_ifindex;
+    int action;
+    __be16 h_proto;
     int err;
 
-    int action = XDP_PASS;
-    int flags  = 0;
-
+    action              = XDP_PASS;
     nh.pos              = data;
     ingress_ifindex     = ctx->ingress_ifindex;
     nat.ingress_ifindex = ingress_ifindex;
 
-    __u32 *egress_ifindex;
     egress_ifindex = bpf_map_lookup_elem(&tx_map, &ingress_ifindex);
     if (!egress_ifindex) {
         bpf_printk("ERR: lookup egress ifindex failed\n");
         goto err;
-    } else {
-        nat.egress_ifindex = *egress_ifindex;
     }
+    nat.egress_ifindex = *egress_ifindex;
 
-    struct ethhdr *eth;
-    __be16 h_proto;
     h_proto = parse_ethhdr(&nh, data_end, &eth);
 
     if (eth + 1 > (struct ethhdr *) data_end) {
@@ -424,6 +585,7 @@ int xnat_ingress(struct xdp_md *ctx) {
     __u8 l4_protocol;
     struct iphdr *iph;
     struct bpf_fib_lookup fib = {};
+    int return_code           = 0;
 
     l4_protocol = 0;
     switch (bpf_ntohs(h_proto)) {
@@ -437,24 +599,26 @@ int xnat_ingress(struct xdp_md *ctx) {
             l4_protocol = iph->protocol;
 
             fib.ifindex = *egress_ifindex;
+
             set_fib(iph, &fib);
-            int rc = next_hop_lookup(ctx, &fib);
-            if (rc != XDP_REDIRECT) {
-                action = rc;
-                goto out;
-            }
+
+            return_code = next_hop_lookup(ctx, &fib, BPF_FIB_LOOKUP_OUTPUT);
+
             _print_fib(&fib);
 
+            if (return_code != XDP_REDIRECT) {
+                action = return_code;
+                goto out;
+            }
             if (update_ipv4(iph, *egress_ifindex, &nat) < 0) {
                 bpf_printk("ERR: update_ipv4 failed\n");
                 goto err;
             }
-
             break;
         case ETH_P_IPV6:
             break;
         default:
-            bpf_printk("Default\n");
+            bpf_printk("INFO: Default\n");
             goto out;
     }
 
@@ -463,11 +627,12 @@ int xnat_ingress(struct xdp_md *ctx) {
         goto err;
     }
 
-    bpf_printk("update_eth\n");
-    if (update_eth(eth, &nat) < 0) {
+    bpf_printk("INFO: update_eth\n");
+    if (update_eth(eth, &fib, &nat) < 0) {
         bpf_printk("ERR: update_eth failed\n");
         goto err;
     }
+
     struct nm_k key;
     key.addr = nat.new_addr;
     key.port = nat.new_port;
@@ -482,7 +647,7 @@ int xnat_ingress(struct xdp_md *ctx) {
         // goto err;
     }
 
-    action = bpf_redirect_map(&tx_map, ingress_ifindex, flags);
+    action = bpf_redirect_map(&tx_map, ingress_ifindex, 0);
 
     goto out;
 err:
@@ -495,12 +660,111 @@ out:
 SEC("xnat/egress")
 int xnat_egress(struct xdp_md *ctx) {
     int action = XDP_PASS;
+
+    bpf_printk("xnat/egress\n");
+
+    void *data     = (void *) (long) ctx->data;
+    void *data_end = (void *) (long) ctx->data_end;
+    struct hdr_cursor nh;
+    struct ethhdr *eth;
+    __be16 h_proto;
+    int err;
+
+    __u32 egress_ifindex;
+    __u32 *ingress_ifindex;
+
+    nh.pos         = data;
+    egress_ifindex = ctx->ingress_ifindex;
+
+    h_proto = parse_ethhdr(&nh, data_end, &eth);
+    if (eth + 1 > (struct ethhdr *) data_end) {
+        goto err;
+    }
+    struct nat_info *nat_info;
+    __u8 l4_protocol;
+    __be16 l4_port;
+    struct iphdr *iph;
+
+    l4_protocol = 0;
+    l4_port     = 0;
+
+    if (bpf_ntohs(h_proto) == ETH_P_ARP) {
+        goto out;
+    }
+    if (bpf_ntohs(h_proto) == ETH_P_IP) {
+        // nat-tableチェック
+        // あればip, portなど修正してリダイレクト
+        // なければegressのfibチェック
+        iph = nh.pos;
+        if (iph + 1 > (struct iphdr *) data_end) goto err;
+        nh.pos = iph + 1;
+
+        l4_protocol = iph->protocol;
+
+        err = get_l4_port(&nh, data_end, l4_protocol, &l4_port);
+
+        if (err < 0) {
+            bpf_printk("ERR: get_l4_port\n");
+            goto err;
+        }
+
+        bpf_printk("Look up nat-table (0x%x:%d)\n",
+                   bpf_ntohl(iph->daddr),
+                   bpf_ntohs(l4_port));
+        struct nm_k key = {
+            .addr = iph->daddr,
+            .port = l4_port,
+        };
+
+        nat_info = bpf_map_lookup_elem(&nat_map, &key);
+        if (!nat_info) {
+            bpf_printk(
+                "ERR: bpf_map_lookup_elem faild or Not found "
+                "nat-info(0x%x:%d)\n",
+                bpf_ntohl(key.addr),
+                bpf_ntohl(key.port));
+            goto err;
+        }
+
+        bpf_printk("DEBUG: Found nat info\n");
+
+        err = egress_update_l4(&nh, data_end, l4_protocol, nat_info->sport);
+        if (err < 0) {
+            goto err;
+        }
+
+        ingress_ifindex = bpf_map_lookup_elem(&tx_map, &egress_ifindex);
+        if (!ingress_ifindex) {
+            goto err;
+        }
+
+        bpf_printk("DEBUG: ingress_ifindex(%d)\n", *ingress_ifindex);
+
+        struct ifinfo *info;
+        info = bpf_map_lookup_elem(&if_map, ingress_ifindex);
+        if (!info) {
+            goto err;
+        }
+
+        struct iphdr old_iphdr;
+        old_iphdr  = *iph;
+        iph->daddr = nat_info->saddr;
+
+        update_ipv4_checksum(&old_iphdr, iph);
+
+        bpf_printk("INFO: egress saddr(0x%x)\n", bpf_ntohl(iph->saddr));
+        bpf_printk("INFO: egress daddr(0x%x)\n", bpf_ntohl(iph->daddr));
+
+        memcpy(eth->h_source, info->mac, ETH_ALEN);
+        memcpy(eth->h_dest, nat_info->seth, ETH_ALEN);
+    }
+    action = bpf_redirect_map(&tx_map, egress_ifindex, 0);
+
     goto out;
 err:
+
     action = XDP_ABORTED;
 out:
-    // return action;
-
     return stats(ctx, &stats_map, action);
 }
 

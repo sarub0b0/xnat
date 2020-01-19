@@ -1,7 +1,8 @@
 
 CC := clang
+# CFLAGS := -O2 -target bpf -Wall -DDEBUG
+# CFLAGS := -O2 -target bpf -Wall
 CFLAGS := -O2 -target bpf -Wall -DDEBUG
-# CFLAGS := -g -target bpf -Wall
 
 all: xnat_kern xnat_user stats loader xnat_user
 
