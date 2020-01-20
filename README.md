@@ -6,7 +6,7 @@
 apt install build-essential
 apt install linux-source-<version>
 
-tar xjf linux-source-<version>
+tar xjf linux-source-<version>.tar.bz2
 
 cp /usr/src/linux-source-<version>/include/uapi/linux/if_xdp.h /usr/include/linux/if_xdp.h
 cp /usr/src/linux-source-<version>/include/uapi/linux/if_link.h /usr/include/linux/if_link.h
@@ -14,7 +14,7 @@ cp /usr/src/linux-source-<version>/include/uapi/linux/bpf.h /usr/include/linux/b
 
 apt install libelf-dev
 
-cd /usr/linux-source-<version>/tools/lib/bpf
+cd /usr/src/linux-source-<version>/tools/lib/bpf
 
 make 
 make install 
