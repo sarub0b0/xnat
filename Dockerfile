@@ -1,6 +1,6 @@
 FROM ubuntu:focal
 
-RUN apt update && apt upgrade -y && apt install -y build-essential \
+RUN apt update && apt upgrade -y && apt install -y build-essential clang\
         && apt -y install linux-source-5.4.0 \
         && cd /usr/src \
         && tar xjf linux-source-5.4.0.tar.bz2 \
