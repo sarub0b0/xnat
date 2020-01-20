@@ -50,3 +50,13 @@ modules.order
 Module.symvers
 Mkfile.old
 dkms.conf
+
+
+loader
+xnat_user
+xnat_kern
+stats
+
+GPATH
+GRTAGS
+GTAGS
