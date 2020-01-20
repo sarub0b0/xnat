@@ -18,6 +18,3 @@ RUN apt update && apt upgrade -y && apt install -y build-essential clang\
         && apt clean \
         && rm -rf /var/lib/apt/lists/*
 
-COPY . /xnat
-
-CMD ["make"]
