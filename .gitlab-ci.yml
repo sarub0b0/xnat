@@ -16,7 +16,7 @@ after_script:
 build1:
   stage: build
   script:
-    - make
+    - make -j
 
 test1:
   stage: test
