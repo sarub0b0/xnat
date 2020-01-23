@@ -19,7 +19,7 @@ struct nat_info {
     __be32 daddr;
     __be16 sport;
     __be16 dport;
-    __be16 proto;
+    __u8 proto;
     __be32 new_addr;
     __be16 new_port;
     // };

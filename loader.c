@@ -18,8 +18,8 @@
 #define EXIT_FAIL_XDP 30
 #define EXIT_FAIL_BPF 40
 
-#define PATH_MAX 32
-#define DEV_MAX 12
+#define PATH_MAX 128
+#define DEV_MAX 32
 
 // #define XDP_UNKNOWN (XDP_REDIRECT + 1)
 #ifndef XDP_ACTION_MAX
@@ -192,14 +192,20 @@ int main(int argc, char *const *argv) {
            -1) {
         switch (c) {
             case 'i':
-                len = snprintf(cfg.ingress_devname, PATH_MAX, "%s", optarg);
+                len = snprintf(cfg.ingress_devname,
+                               sizeof(cfg.ingress_devname),
+                               "%s",
+                               optarg);
                 if (len < 0) {
                     return EXIT_FAIL_OPTION;
                 }
                 set_devname++;
                 break;
             case 'e':
-                len = snprintf(cfg.egress_devname, PATH_MAX, "%s", optarg);
+                len = snprintf(cfg.egress_devname,
+                               sizeof(cfg.ingress_devname),
+                               "%s",
+                               optarg);
                 if (len < 0) {
                     return EXIT_FAIL_OPTION;
                 }
