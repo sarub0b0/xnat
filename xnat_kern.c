@@ -427,6 +427,7 @@ ingress_update_tcp(struct hdr_cursor *nh,
     nat->dport = hdr->dest;
 
     nat->new_port = get_new_port(nat->sport);
+
     bpf_printk("INFO: TCP old sport(%d) dport(%d) csum(0x%x)\n",
                bpf_ntohs(hdr->source),
                bpf_ntohs(hdr->dest),
@@ -435,15 +436,15 @@ ingress_update_tcp(struct hdr_cursor *nh,
     if (nat->new_port > 0) {
         hdr->source = nat->new_port;
 
+        l4_csum_replace(
+            &hdr->check, nat->sport, nat->new_port, sizeof(nat->new_port));
+
         l4_csum_replace(&hdr->check,
                         // nat->saddr,
                         // nat->new_addr,
                         bpf_ntohl(nat->saddr),
                         bpf_ntohl(nat->new_addr),
                         sizeof(nat->new_addr) | IS_PSEUDO);
-        l4_csum_replace(
-            &hdr->check, nat->sport, nat->new_port, sizeof(nat->new_port));
-
         bpf_printk("INFO: TCP new sport(%d) dport(%d) csum(0x%x)\n",
                    bpf_ntohs(hdr->source),
                    bpf_ntohs(hdr->dest),
@@ -494,18 +495,21 @@ update_l4(struct hdr_cursor *nh,
     nat->proto = l4_protocol;
     switch (l4_protocol) {
         case IPPROTO_ICMP:
+            bpf_printk("INFO: ICMP Ingress update\n");
             if (update_icmp(nh, data_end, nat) < 0) {
                 bpf_printk("ERR: update icmp failed\n");
                 return -1;
             }
             break;
         case IPPROTO_UDP:
+            bpf_printk("INFO: UDP Ingress update\n");
             if (ingress_update_udp(nh, data_end, nat) < 0) {
                 bpf_printk("ERR: update udp failed\n");
                 return -1;
             }
             break;
         case IPPROTO_TCP:
+            bpf_printk("INFO: TCP Ingress update\n");
             if (ingress_update_tcp(nh, data_end, nat) < 0) {
                 bpf_printk("ERR: update tcp failed\n");
                 return -1;
@@ -609,27 +613,35 @@ egress_update_tcp(struct hdr_cursor *nh,
                   void *data_end,
                   __be16 port,
                   struct nat_info *nat) {
+
     struct tcphdr *new = nh->pos;
-    struct tcphdr old;
+    // struct tcphdr old;
     if (new + 1 > (struct tcphdr *) data_end) {
         return -1;
     }
 
-    old       = *new;
-    new->dest = port;
+    // old       = *new;
 
     bpf_printk("INFO: TCP update(0x%x:%d)\n",
                bpf_ntohl(nat->saddr),
                bpf_ntohs(new->dest));
 
+    bpf_printk("INFO: Change from dest addr(0x%x) to (0x%x)\n",
+               bpf_ntohl(nat->new_addr),
+               bpf_ntohl(nat->saddr));
+    bpf_printk("INFO: Change from dest port(%d) to (%d)\n",
+               bpf_ntohs(nat->new_port),
+               bpf_ntohs(port));
+    l4_csum_replace(&new->check, nat->new_port, port, sizeof(port));
+
     l4_csum_replace(&new->check,
                     // nat->daddr,
                     // nat->saddr,
-                    bpf_ntohl(nat->daddr),
+                    bpf_ntohl(nat->new_addr),
                     bpf_ntohl(nat->saddr),
                     sizeof(nat->saddr) | IS_PSEUDO);
-    l4_csum_replace(&new->check, nat->sport, port, sizeof(port));
 
+    new->dest = port;
     return 0;
 }
 static __always_inline int
@@ -646,11 +658,11 @@ egress_update_udp(struct hdr_cursor *nh,
     old       = *new;
     new->dest = port;
 
+    l4_csum_replace(&new->check, nat->sport, port, sizeof(port));
     l4_csum_replace(&new->check,
                     bpf_ntohl(nat->daddr),
                     bpf_ntohl(nat->saddr),
                     sizeof(nat->saddr) | IS_PSEUDO);
-    l4_csum_replace(&new->check, nat->sport, port, sizeof(port));
 
     return 0;
 }
@@ -664,16 +676,19 @@ egress_update_l4(struct hdr_cursor *nh,
 
     switch (protocol) {
         case IPPROTO_ICMP:
+            bpf_printk("INFO: ICMP Egress update\n");
             if (egress_update_icmp(nh, data_end, port) < 0) {
                 return -1;
             }
             break;
         case IPPROTO_UDP:
+            bpf_printk("INFO: UDP Egress update\n");
             if (egress_update_udp(nh, data_end, port, nat) < 0) {
                 return -1;
             }
             break;
         case IPPROTO_TCP:
+            bpf_printk("INFO: TCP Egress update\n");
             if (egress_update_tcp(nh, data_end, port, nat) < 0) {
                 return -1;
             }
@@ -819,10 +834,12 @@ xnat_egress(struct xdp_md *ctx) {
     nh.pos         = data;
     egress_ifindex = ctx->ingress_ifindex;
 
+    // VLAN剥がす
     h_proto = parse_ethhdr(&nh, data_end, &eth);
     if (eth + 1 > (struct ethhdr *) data_end) {
         goto err;
     }
+
     struct nat_info *nat_info;
     __u8 l4_protocol;
     __be16 l4_port;
@@ -842,8 +859,12 @@ xnat_egress(struct xdp_md *ctx) {
         if (iph + 1 > (struct iphdr *) data_end) goto err;
         nh.pos = iph + 1;
 
+        // ICMP/UDP/TCP判別に使う
+        // IPPROTO_*
         l4_protocol = iph->protocol;
 
+        // 宛先ポート番号取得
+        // natテーブルから検索するキーになる
         err = get_l4_port(&nh, data_end, l4_protocol, &l4_port);
 
         if (err < 0) {
@@ -854,6 +875,7 @@ xnat_egress(struct xdp_md *ctx) {
         bpf_printk("Look up nat-table (0x%x:%d)\n",
                    bpf_ntohl(iph->daddr),
                    bpf_ntohs(l4_port));
+
         struct nm_k key = {
             .addr = iph->daddr,
             .port = l4_port,
@@ -871,6 +893,7 @@ xnat_egress(struct xdp_md *ctx) {
 
         bpf_printk("DEBUG: Found nat info\n");
 
+        // ポート番号の変更、チェックサム再計算
         err = egress_update_l4(
             &nh, data_end, l4_protocol, nat_info->sport, nat_info);
         if (err < 0) {
