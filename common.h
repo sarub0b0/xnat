@@ -10,6 +10,8 @@
 #define CSUM_MANGLED_0 ((__sum16) 0xffff)
 #define IS_PSEUDO 0x10
 
+#define __force __attribute__((force))
+
 struct ether_arp {
     __be16 ar_hrd;
     __be16 ar_pro;
@@ -86,12 +88,10 @@ static __always_inline __wsum
 csum_add(__wsum csum, __wsum addend) {
     __u32 res = (__u32) csum;
     res += (__u32) addend;
-
     return (__wsum)(res + (res < (__u32) addend));
 }
 static __always_inline __wsum
 csum_sub(__wsum csum, __wsum addend) {
-
     return csum_add(csum, ~addend);
 }
 
@@ -106,16 +106,15 @@ csum16_sub(__sum16 csum, __be16 addend) {
     return csum16_add(csum, ~addend);
 }
 
-static __always_inline __sum16
-csum_replace4(__sum16 sum, __be32 old, __be32 new) {
-    __wsum tmp = csum_sub(~csum_unfold(sum), (__wsum) old);
-    return csum_fold(csum_add(tmp, (__wsum) new));
+static __always_inline void
+csum_replace4(__sum16 *sum, __be32 from, __be32 to) {
+    __wsum tmp = csum_sub(~csum_unfold(*sum), (__wsum) from);
+    *sum       = csum_fold(csum_add(tmp, (__wsum) to));
 }
 
-static __always_inline __sum16
-csum_replace2(__sum16 sum, __be16 old, __be16 new) {
-
-    return ~csum16_add(csum16_sub(~(sum), old), new);
+static __always_inline void
+csum_replace2(__sum16 *sum, __be16 from, __be16 to) {
+    *sum = ~csum16_add(csum16_sub(~(*sum), from), to);
 }
 
 static __always_inline void
@@ -125,7 +124,6 @@ csum_replace_by_diff(__sum16 *sum, __wsum diff) {
 
 static __always_inline void
 inet_proto_csum_replace4(__sum16 *sum, __be32 from, __be32 to, bool pseudohdr) {
-
     if (pseudohdr) {
         bpf_printk("replace4 pseudo\n");
         *sum = ~csum_fold(
@@ -133,8 +131,7 @@ inet_proto_csum_replace4(__sum16 *sum, __be32 from, __be32 to, bool pseudohdr) {
 
     } else {
         bpf_printk("replace4 csum_fold\n");
-        *sum = csum_replace4(*sum, from, to);
-        // *sum = ~csum_add(csum_sub(~(*sum), (__wsum) from), (__wsum) to);
+        csum_replace4(sum, from, to);
     }
 }
 
@@ -153,6 +150,8 @@ inet_proto_csum_replace_by_diff(__sum16 *sum, __wsum diff, bool pseudohdr) {
 }
 
 static __always_inline int
+// l4_csum_replace(__sum16 *sum, __be32 old_value, __be32 new_value, __u64
+// flags) {
 l4_csum_replace(__sum16 *sum, __u64 old_value, __u64 new_value, __u64 flags) {
 
     bpf_printk("old (0x%x) new(0x%x)\n", old_value, new_value);
@@ -160,6 +159,16 @@ l4_csum_replace(__sum16 *sum, __u64 old_value, __u64 new_value, __u64 flags) {
     bool is_pseudo = flags & BPF_F_PSEUDO_HDR;
     bool is_mmzero = flags & BPF_F_MARK_MANGLED_0;
     bool do_mforce = flags & BPF_F_MARK_ENFORCE;
+
+    if (is_mmzero) {
+        bpf_printk("DEBUG: BPF_F_MARK_MANGLED_0\n");
+    }
+    if (is_pseudo) {
+        bpf_printk("DEBUG: BPF_F_PSEUDO_HDR\n");
+    }
+    if (do_mforce) {
+        bpf_printk("DEBUG: BPF_F_MARK_ENFORCE\n");
+    }
 
     if (flags & ~(BPF_F_MARK_MANGLED_0 | BPF_F_MARK_ENFORCE | BPF_F_PSEUDO_HDR |
                   BPF_F_HDR_FIELD_MASK))
@@ -214,13 +223,13 @@ l3_csum_replace(__sum16 *sum, __be32 old_value, __be32 new_value, __u32 flags) {
             break;
         case 2:
             // *sum = ~csum16_add(csum16_add(~(*sum), ~old_value), new_value);
-            *sum = csum_replace2(*sum, old_value, new_value);
+            csum_replace2(sum, old_value, new_value);
             bpf_printk("case 2\n");
             break;
         case 4:
             bpf_printk("case 4\n");
             // csum_replace_by_diff(sum, csum_add(new_value, ~old_value));
-            *sum = csum_replace4(*sum, old_value, new_value);
+            csum_replace4(sum, old_value, new_value);
             break;
         default:
             return -1;

@@ -29,8 +29,8 @@ const char *port_pool_map_name = "port_pool_map";
 const char *freelist_map_name  = "freelist_map";
 const char *if_map_name        = "if_map";
 
-const char *i_ifname = "ingress_xnat";
-const char *e_ifname = "egress_xnat";
+const char *i_ifname = "ens4";
+const char *e_ifname = "ens5";
 
 const char *sub_dir = "xnat";
 

@@ -375,30 +375,33 @@ ingress_update_udp(struct hdr_cursor *nh,
     bpf_printk("INFO: UDP old sport(%d) dport(%d) csum(0x%x)\n",
                bpf_ntohs(hdr->source),
                bpf_ntohs(hdr->dest),
-               hdr->check);
+               bpf_ntohs(hdr->check));
 
-    int data_len = bpf_ntohs(hdr->len) - sizeof(*hdr);
-    bpf_printk("INFO: UDP len(%d)\n", data_len);
+    bpf_printk("INFO: UDP len(%d)\n", bpf_ntohs(hdr->len) - sizeof(*hdr));
     if (nat->new_port > 0) {
         hdr->source = nat->new_port;
 
+        __sum16 csum = hdr->check;
         bpf_printk(
             "INFO: old-addr(0x%x) new-addr(0x%x)\n", nat->saddr, nat->new_addr);
-        bpf_printk(
-            "INFO: old-port(0x%x) new-port(0x%x)\n", nat->sport, nat->new_port);
+        bpf_printk("INFO: old-port(%d) new-port(%d)\n",
+                   bpf_ntohs(nat->sport),
+                   bpf_ntohs(nat->new_port));
 
-        l4_csum_replace(&hdr->check,
-                        nat->saddr,
-                        nat->new_addr,
-                        sizeof(nat->new_addr) | IS_PSEUDO);
         l4_csum_replace(
+            &csum, nat->sport, nat->new_port, sizeof(nat->new_port));
 
-            &hdr->check, nat->sport, nat->new_port, sizeof(nat->new_port));
+        l4_csum_replace(&csum,
+                        bpf_ntohl(nat->saddr),
+                        bpf_ntohl(nat->new_addr),
+                        IS_PSEUDO | sizeof(nat->saddr));
 
+        hdr->check = csum;
         bpf_printk("INFO: UDP new sport(%d) dport(%d) csum(0x%x)\n",
                    bpf_ntohs(hdr->source),
                    bpf_ntohs(hdr->dest),
-                   hdr->check);
+                   bpf_ntohs(hdr->check));
+
     } else {
         return -1;
     }
@@ -424,16 +427,28 @@ ingress_update_tcp(struct hdr_cursor *nh,
     nat->dport = hdr->dest;
 
     nat->new_port = get_new_port(nat->sport);
+    bpf_printk("INFO: TCP old sport(%d) dport(%d) csum(0x%x)\n",
+               bpf_ntohs(hdr->source),
+               bpf_ntohs(hdr->dest),
+               bpf_ntohs(hdr->check));
 
     if (nat->new_port > 0) {
         hdr->source = nat->new_port;
 
+        l4_csum_replace(&hdr->check,
+                        // nat->saddr,
+                        // nat->new_addr,
+                        bpf_ntohl(nat->saddr),
+                        bpf_ntohl(nat->new_addr),
+                        sizeof(nat->new_addr) | IS_PSEUDO);
         l4_csum_replace(
             &hdr->check, nat->sport, nat->new_port, sizeof(nat->new_port));
 
-        bpf_printk("INFO: UDP sport(%d) dport(%d)\n",
+        bpf_printk("INFO: TCP new sport(%d) dport(%d) csum(0x%x)\n",
                    bpf_ntohs(hdr->source),
-                   bpf_ntohs(hdr->dest));
+                   bpf_ntohs(hdr->dest),
+                   bpf_ntohs(hdr->check));
+
     } else {
         return -1;
     }
@@ -590,7 +605,10 @@ egress_update_icmp(struct hdr_cursor *nh, void *data_end, __be16 port) {
 }
 
 static __always_inline int
-egress_update_tcp(struct hdr_cursor *nh, void *data_end, __be16 port) {
+egress_update_tcp(struct hdr_cursor *nh,
+                  void *data_end,
+                  __be16 port,
+                  struct nat_info *nat) {
     struct tcphdr *new = nh->pos;
     struct tcphdr old;
     if (new + 1 > (struct tcphdr *) data_end) {
@@ -600,7 +618,18 @@ egress_update_tcp(struct hdr_cursor *nh, void *data_end, __be16 port) {
     old       = *new;
     new->dest = port;
 
-    // update_tcp_checksum(&old, new);
+    bpf_printk("INFO: TCP update(0x%x:%d)\n",
+               bpf_ntohl(nat->saddr),
+               bpf_ntohs(new->dest));
+
+    l4_csum_replace(&new->check,
+                    // nat->daddr,
+                    // nat->saddr,
+                    bpf_ntohl(nat->daddr),
+                    bpf_ntohl(nat->saddr),
+                    sizeof(nat->saddr) | IS_PSEUDO);
+    l4_csum_replace(&new->check, nat->sport, port, sizeof(port));
+
     return 0;
 }
 static __always_inline int
@@ -617,7 +646,12 @@ egress_update_udp(struct hdr_cursor *nh,
     old       = *new;
     new->dest = port;
 
-    // update_udp_checksum(nh, data_end, &old, new, nat);
+    l4_csum_replace(&new->check,
+                    bpf_ntohl(nat->daddr),
+                    bpf_ntohl(nat->saddr),
+                    sizeof(nat->saddr) | IS_PSEUDO);
+    l4_csum_replace(&new->check, nat->sport, port, sizeof(port));
+
     return 0;
 }
 
@@ -640,9 +674,10 @@ egress_update_l4(struct hdr_cursor *nh,
             }
             break;
         case IPPROTO_TCP:
-            if (egress_update_tcp(nh, data_end, port) < 0) {
+            if (egress_update_tcp(nh, data_end, port, nat) < 0) {
                 return -1;
             }
+
             break;
     }
     return 0;
