@@ -7,6 +7,7 @@
 #include <net/if.h>
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
+#include <linux/if_link.h>
 #include <errno.h>
 #include <getopt.h>
 
@@ -18,8 +19,8 @@
 #define EXIT_FAIL_XDP 30
 #define EXIT_FAIL_BPF 40
 
-#define PATH_MAX 32
-#define DEV_MAX 12
+#define PATH_MAX 128
+#define DEV_MAX 32
 
 // #define XDP_UNKNOWN (XDP_REDIRECT + 1)
 #ifndef XDP_ACTION_MAX
@@ -67,7 +68,8 @@ struct option long_options[] = {
 
 char short_options[] = "i:e:o:d:h";
 
-void usage(void) {
+void
+usage(void) {
     printf("Usage: ./loader [options] (root permission)\n");
     printf("\n");
     printf("  Required options:\n");
@@ -80,10 +82,11 @@ void usage(void) {
     printf("    --help,    -h: help\n");
 }
 
-int link_attach(struct config *cfg,
-                struct bpf_object **obj,
-                char *progsec,
-                char *devname) {
+int
+link_attach(struct config *cfg,
+            struct bpf_object **obj,
+            char *progsec,
+            char *devname) {
     struct bpf_program *bpf_prog;
     int prog_fd;
     int ifindex;
@@ -108,7 +111,7 @@ int link_attach(struct config *cfg,
         return EXIT_FAIL_BPF;
     }
 
-    if (bpf_set_link_xdp_fd(ifindex, prog_fd, 0) < 0) {
+    if (bpf_set_link_xdp_fd(ifindex, prog_fd, XDP_FLAGS_SKB_MODE) < 0) {
         info("ERR: Can't attach to interface %s:%d",
              cfg->ingress_devname,
              ifindex);
@@ -117,7 +120,8 @@ int link_attach(struct config *cfg,
     return 0;
 }
 
-int pin_maps_in_bpf_object(struct bpf_object *obj, const char *subdir) {
+int
+pin_maps_in_bpf_object(struct bpf_object *obj, const char *subdir) {
     char map_filename[PATH_MAX];
     char pin_dir[PATH_MAX];
     int err, len;
@@ -168,7 +172,8 @@ int pin_maps_in_bpf_object(struct bpf_object *obj, const char *subdir) {
     return 0;
 }
 
-int main(int argc, char *const *argv) {
+int
+main(int argc, char *const *argv) {
 
     struct config cfg;
     struct bpf_object *obj = NULL;
@@ -192,14 +197,20 @@ int main(int argc, char *const *argv) {
            -1) {
         switch (c) {
             case 'i':
-                len = snprintf(cfg.ingress_devname, PATH_MAX, "%s", optarg);
+                len = snprintf(cfg.ingress_devname,
+                               sizeof(cfg.ingress_devname),
+                               "%s",
+                               optarg);
                 if (len < 0) {
                     return EXIT_FAIL_OPTION;
                 }
                 set_devname++;
                 break;
             case 'e':
-                len = snprintf(cfg.egress_devname, PATH_MAX, "%s", optarg);
+                len = snprintf(cfg.egress_devname,
+                               sizeof(cfg.ingress_devname),
+                               "%s",
+                               optarg);
                 if (len < 0) {
                     return EXIT_FAIL_OPTION;
                 }
