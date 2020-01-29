@@ -1,13 +1,16 @@
 
 CC := clang
+LLC := llc
 # CFLAGS := -O2 -target bpf -Wall -DDEBUG
-CFLAGS := -O2 -target bpf -Wall
+CFLAGS := -O2 -emit-llvm -Wall
+DEBUGFLAG := -g
+LLFLAGS := -march=bpf -filetype=obj
 # CFLAGS := -O2 -target bpf -Wall -DDEBUG
 
 all: xnat_kern xnat_user stats loader xnat_user
 
 xnat_kern:
-	$(CC) $(CFLAGS) -c xnat_kern.c -o xnat_kern.o
+	$(CC) $(CFLAGS) $(DEBUGFLAG) -c xnat_kern.c -o -| $(LLC) $(LLFLAGS) -o xnat_kern.o
 .PHONY: xnat_kern
 
 xnat_user:
