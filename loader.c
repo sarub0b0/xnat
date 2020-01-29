@@ -51,6 +51,7 @@ struct config {
     char obj_name[PATH_MAX];
     char ingress_devname[DEV_MAX];
     char egress_devname[DEV_MAX];
+    __u32 xdp_flags;
 };
 
 struct bpf_prog_load_attr prog_load_attr = {
@@ -64,6 +65,7 @@ struct option long_options[] = {
     {"obj", required_argument, NULL, 'o'},
     {"sub-dir", required_argument, NULL, 'd'},
     {"help", no_argument, NULL, 'h'},
+    {"native", no_argument, NULL, 1},
 };
 
 char short_options[] = "i:e:o:d:h";
@@ -80,6 +82,7 @@ usage(void) {
     printf("\n");
     printf("  Other options:\n");
     printf("    --help,    -h: help\n");
+    printf("    --native : native mode (default generic mode)\n");
 }
 
 int
@@ -111,7 +114,7 @@ link_attach(struct config *cfg,
         return EXIT_FAIL_BPF;
     }
 
-    if (bpf_set_link_xdp_fd(ifindex, prog_fd, XDP_FLAGS_SKB_MODE) < 0) {
+    if (bpf_set_link_xdp_fd(ifindex, prog_fd, cfg->xdp_flags) < 0) {
         info("ERR: Can't attach to interface %s:%d",
              cfg->ingress_devname,
              ifindex);
@@ -192,6 +195,8 @@ main(int argc, char *const *argv) {
         return 1;
     }
 
+    cfg.xdp_flags = XDP_FLAGS_SKB_MODE;
+
     int c;
     while ((c = getopt_long(argc, argv, short_options, long_options, NULL)) !=
            -1) {
@@ -235,6 +240,10 @@ main(int argc, char *const *argv) {
             case 'h':
                 usage();
                 return 1;
+            case 1:
+                cfg.xdp_flags &= ~XDP_FLAGS_MODES;
+                cfg.xdp_flags |= XDP_FLAGS_DRV_MODE;
+                break;
             default:
                 usage();
                 return EXIT_FAIL;
