@@ -17,10 +17,7 @@
 #include "parser.h"
 #include "ifinfo.h"
 #include "nat.h"
-// #include "eth.h"
-// #include "icmp.h"
-// #include "ipv4.h"
-// #include "fib.h"
+#include "pcapdump.h"
 
 #define offsetof(TYPE, MEMBER) ((size_t) & ((TYPE *) 0)->MEMBER)
 
@@ -41,13 +38,7 @@
      offsetof(struct tcphdr, dest))
 #define IS_PSEUDO 0x10
 
-// #define PROG(F) SEC(#F) int bpf_func_##F
-
-// enum {
-//     ARP = 1,
-//     IP,
-//     IPV6,
-// };
+#define PROG(F) SEC(#F) int bpf_func_##F
 
 // struct bpf_map_def SEC("maps") prog_map = {
 //     .type        = BPF_MAP_TYPE_PROG_ARRAY,
@@ -810,6 +801,7 @@ xnat_ingress(struct xdp_md *ctx) {
 err:
     action = XDP_ABORTED;
 out:
+    pcap(ctx);
     return stats(ctx, &stats_map, action);
     // return action;
 }
@@ -932,6 +924,7 @@ err:
 
     action = XDP_ABORTED;
 out:
+    pcap(ctx);
     return stats(ctx, &stats_map, action);
 }
 

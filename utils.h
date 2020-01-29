@@ -16,6 +16,8 @@
 #define XDP_ACTION_MAX (XDP_REDIRECT + 1)
 #endif
 
+#include <errno.h>
+
 static inline uint32_t bpf_num_possible_cpus(void) {
     uint32_t cpus = libbpf_num_possible_cpus();
     if (cpus < 0) {

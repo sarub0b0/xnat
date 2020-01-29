@@ -1,6 +1,11 @@
 FROM ubuntu:focal
 
-RUN apt update && apt upgrade -y && apt install -y build-essential clang\
+RUN apt update && apt upgrade -y \
+        && apt install -y \
+        build-essential \
+        clang \
+        libc6-dev-i386 \
+        llvm \
         && apt -y install linux-source-5.4.0 \
         && cd /usr/src \
         && tar xjf linux-source-5.4.0.tar.bz2 \
