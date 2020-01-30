@@ -1,23 +1,24 @@
-#include <stdio.h>
-#include <stdlib.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstdint>
+#include <string>
+#include <cerrno>
+
 #include <time.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <stdint.h>
-#include <string.h>
 #include <net/if.h>
 #include <bpf/bpf.h>
 #include <bpf/libbpf.h>
-#include <errno.h>
 #include <locale.h>
 
 #include "stats.h"
 #include "message.h"
 #include "utils.h"
 
-const char *map_name    = "stats_map";
-const char *dev_name    = "xnat";
-const char *pin_basedir = "/sys/fs/bpf";
+const std::string map_name    = "stats_map";
+const std::string dev_name    = "xnat";
+const std::string pin_basedir = "/sys/fs/bpf";
 
 const char *xdp_action_names[XDP_ACTION_MAX] = {
     [XDP_ABORTED]  = "XDP_ABORTED",
@@ -36,7 +37,8 @@ struct stats_record {
     struct record stats[XDP_ACTION_MAX];
 };
 
-const char *action2str(uint32_t action) {
+const char *
+action2str(uint32_t action) {
     if (action < XDP_ACTION_MAX) {
         return xdp_action_names[action];
     }
@@ -44,7 +46,8 @@ const char *action2str(uint32_t action) {
 }
 
 #define NANOSEC_PER_SEC 1000000000
-static uint64_t gettime(void) {
+static uint64_t
+gettime(void) {
     struct timespec t;
     int res;
 
@@ -56,7 +59,8 @@ static uint64_t gettime(void) {
     return (uint64_t) t.tv_sec * NANOSEC_PER_SEC + t.tv_nsec;
 }
 
-static double calc_period(struct record *r, struct record *p) {
+static double
+calc_period(struct record *r, struct record *p) {
     double ret      = 0;
     uint64_t period = 0;
     period          = r->timestamp - p->timestamp;
@@ -66,12 +70,13 @@ static double calc_period(struct record *r, struct record *p) {
     return ret;
 }
 
-static inline void stats_print_header(void) {
+static inline void
+stats_print_header(void) {
     printf("%-12s\n", "XDP-action");
 }
 
-static void stats_print(struct stats_record *stats_rec,
-                        struct stats_record *stats_prev) {
+static void
+stats_print(struct stats_record *stats_rec, struct stats_record *stats_prev) {
     struct record *rec, *prev;
     uint64_t packets, bytes;
     double period;
@@ -81,7 +86,7 @@ static void stats_print(struct stats_record *stats_rec,
     stats_print_header();
 
     for (int i = 0; i < XDP_ACTION_MAX; i++) {
-        char *fmt =
+        std::string fmt =
             "%-12s %'11lld pkts (%'10.0f pps) %'11lld Kbytes (%'6.0f Mbits/s) "
             "period:%f\n";
 
@@ -101,7 +106,7 @@ static void stats_print(struct stats_record *stats_rec,
         bytes = rec->total.rx_bytes - prev->total.rx_bytes;
         bps   = (bytes * 8) / period / 1000000;
 
-        printf(fmt,
+        printf(fmt.c_str(),
                action,
                rec->total.rx_packets,
                pps,
@@ -111,14 +116,16 @@ static void stats_print(struct stats_record *stats_rec,
     }
     printf("\n");
 }
-void map_get_value_array(int fd, uint32_t key, struct datarec *value) {
+void
+map_get_value_array(int fd, uint32_t key, struct datarec *value) {
 
     if ((bpf_map_lookup_elem(fd, &key, value)) != 0) {
         fprintf(stderr, "ERR: bpf_map_lookup_elem failed\n");
     }
 }
 
-void map_get_value_percpu_array(int fd, uint32_t key, struct datarec *value) {
+void
+map_get_value_percpu_array(int fd, uint32_t key, struct datarec *value) {
 
     uint32_t nr_cpus = bpf_num_possible_cpus();
     struct datarec values[nr_cpus];
@@ -137,10 +144,8 @@ void map_get_value_percpu_array(int fd, uint32_t key, struct datarec *value) {
     value->rx_bytes   = sum_bytes;
 }
 
-static bool map_collect(int fd,
-                        uint32_t map_type,
-                        uint32_t key,
-                        struct record *rec) {
+static bool
+map_collect(int fd, uint32_t map_type, uint32_t key, struct record *rec) {
     struct datarec value;
 
     rec->timestamp = gettime();
@@ -162,16 +167,19 @@ static bool map_collect(int fd,
     return true;
 }
 
-static void stats_collect(int map_fd,
-                          uint32_t map_type,
-                          struct stats_record *stats_rec) {
+static void
+stats_collect(int map_fd, uint32_t map_type, struct stats_record *stats_rec) {
     for (int key = 0; key < XDP_ACTION_MAX; key++) {
         map_collect(map_fd, map_type, key, &stats_rec->stats[key]);
     }
 }
 
-static int stats_poll(
-    const char *pin_dir, int map_fd, int id, uint32_t map_type, int interval) {
+static int
+stats_poll(const std::string *pin_dir,
+           int map_fd,
+           int id,
+           uint32_t map_type,
+           int interval) {
 
     struct bpf_map_info info = {};
     struct stats_record prev, record = {};
@@ -184,11 +192,11 @@ static int stats_poll(
     while (1) {
         prev = record;
 
-        map_fd = open_bpf_map_file(pin_dir, map_name, &info);
+        map_fd = open_bpf_map_file(pin_dir, &map_name, &info);
         if (map_fd < 0) {
             return EXIT_FAIL_BPF;
         } else if (id != info.id) {
-            info("BPF map %s changed its ID, restarting\n", map_name);
+            info("BPF map %s changed its ID, restarting\n", map_name.c_str());
             close(map_fd);
             return 0;
         }
@@ -199,25 +207,26 @@ static int stats_poll(
     }
 }
 
-int main(int argc, char const *argv[]) {
+int
+main(int argc, char const *argv[]) {
 
-    char pin_dir[PATH_MAX];
+    std::string pin_dir;
     struct bpf_map_info info = {0};
     int map_fd;
-    int len;
     int err;
 
-    len = snprintf(pin_dir, PATH_MAX, "%s/%s", pin_basedir, dev_name);
-    if (len < 0) {
+    pin_dir = pin_basedir + "/" + dev_name;
+    if (pin_dir.length() < 0) {
         err("creating pin dirname");
         return EXIT_FAIL_OPTION;
     }
 
     int interval = 2;
     while (1) {
-        map_fd = open_bpf_map_file(pin_dir, map_name, &info);
+        map_fd = open_bpf_map_file(&pin_dir, &map_name, &info);
         if (map_fd < 0) {
-            fprintf(stderr, "ERR: bpf_map__fd failed. [%s]\n", map_name);
+            fprintf(
+                stderr, "ERR: bpf_map__fd failed. [%s]\n", map_name.c_str());
             return EXIT_FAIL_BPF;
         }
 
@@ -233,7 +242,7 @@ int main(int argc, char const *argv[]) {
             info.value_size,
             info.max_entries);
 
-        err = stats_poll(pin_dir, map_fd, info.id, info.type, interval);
+        err = stats_poll(&pin_dir, map_fd, info.id, info.type, interval);
         if (err < 0) {
             return err;
         }

@@ -16,9 +16,12 @@
 #define XDP_ACTION_MAX (XDP_REDIRECT + 1)
 #endif
 
+#include <cstring>
+
 #include <errno.h>
 
-static inline uint32_t bpf_num_possible_cpus(void) {
+static inline uint32_t
+bpf_num_possible_cpus(void) {
     uint32_t cpus = libbpf_num_possible_cpus();
     if (cpus < 0) {
         err("Failed to get # of possible cpus: '%s'!", strerror(-cpus));
@@ -27,27 +30,28 @@ static inline uint32_t bpf_num_possible_cpus(void) {
     return cpus;
 }
 
-int open_bpf_map_file(const char *pin_dir,
-                      const char *map_name,
-                      struct bpf_map_info *info) {
+int
+open_bpf_map_file(const std::string *pin_dir,
+                  const std::string *map_name,
+                  struct bpf_map_info *info) {
 
     int fd  = -1;
     int len = -1;
     int err = -1;
 
-    char filename[PATH_MAX];
+    std::string filename;
     uint32_t info_len = sizeof(*info);
 
-    len = snprintf(filename, PATH_MAX, "%s/%s", pin_dir, map_name);
-    if (len < 0) {
+    filename = *pin_dir + "/" + *map_name;
+    if (filename.length() < 0) {
         err("constructing full map_name path");
         return -1;
     }
 
-    fd = bpf_obj_get(filename);
+    fd = bpf_obj_get(filename.c_str());
     if (fd < 0) {
         err("failed to open bpf map file: %s err(%d):%s",
-            filename,
+            filename.c_str(),
             errno,
             strerror(errno));
         return fd;

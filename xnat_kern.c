@@ -18,6 +18,7 @@
 #include "ifinfo.h"
 #include "nat.h"
 #include "pcapdump.h"
+#include "prog.h"
 
 #define offsetof(TYPE, MEMBER) ((size_t) & ((TYPE *) 0)->MEMBER)
 
@@ -40,13 +41,20 @@
 
 #define PROG(F) SEC(#F) int bpf_func_##F
 
-// struct bpf_map_def SEC("maps") prog_map = {
-//     .type        = BPF_MAP_TYPE_PROG_ARRAY,
-//     .key_size    = sizeof(__u32),
-//     .value_size  = sizeof(__u32),
-//     .max_entries = 8,
-// };
-//
+struct bpf_map_def SEC("maps") ingress_prog_map = {
+    .type        = BPF_MAP_TYPE_PROG_ARRAY,
+    .key_size    = sizeof(__u32),
+    .value_size  = sizeof(__u32),
+    .max_entries = MAX_PROGS,
+};
+
+struct bpf_map_def SEC("maps") egress_prog_map = {
+    .type        = BPF_MAP_TYPE_PROG_ARRAY,
+    .key_size    = sizeof(__u32),
+    .value_size  = sizeof(__u32),
+    .max_entries = MAX_PROGS,
+};
+
 struct bpf_map_def SEC("maps") tx_map = {
     .type        = BPF_MAP_TYPE_DEVMAP,
     .key_size    = sizeof(__u32),
@@ -689,9 +697,9 @@ egress_update_l4(struct hdr_cursor *nh,
     return 0;
 }
 
-SEC("xnat/ingress")
-int
-xnat_ingress(struct xdp_md *ctx) {
+PROG(INGRESS_NAT)(struct xdp_md *ctx) {
+    pcap(ctx);
+
     struct nat_info nat = {0};
 
     void *data     = (void *) (long) ctx->data;
@@ -801,14 +809,13 @@ xnat_ingress(struct xdp_md *ctx) {
 err:
     action = XDP_ABORTED;
 out:
-    pcap(ctx);
     return stats(ctx, &stats_map, action);
     // return action;
 }
 
-SEC("xnat/egress")
-int
-xnat_egress(struct xdp_md *ctx) {
+PROG(EGRESS_NAT)(struct xdp_md *ctx) {
+    pcap(ctx);
+
     int action = XDP_PASS;
 
     bpf_printk("xnat/egress\n");
@@ -924,23 +931,37 @@ err:
 
     action = XDP_ABORTED;
 out:
-    pcap(ctx);
     return stats(ctx, &stats_map, action);
 }
+PROG(INGRESS_PCAP)(struct xdp_md *ctx) {
+    bpf_printk("INFO: INGRESS_PCAP\n");
+    pcap(ctx);
 
-// PROG(ARP)(struct xdp_md *ctx) {
-//     bpf_printk("bpf_tail_call ARP\n");
+    bpf_tail_call(ctx, &ingress_prog_map, INGRESS_NAT);
 
-//     return XDP_PASS;
-// }
+    return XDP_ABORTED;
+}
+PROG(EGRESS_PCAP)(struct xdp_md *ctx) {
+    bpf_printk("INFO: EGRESS_PCAP\n");
+    pcap(ctx);
 
-// PROG(IP)(struct xdp_md *ctx) {
-//     bpf_printk("bpf_tail_call IP\n");
-//     return XDP_PASS;
-// }
-// PROG(IPV6)(struct xdp_md *ctx) {
-//     bpf_printk("bpf_tail_call IPV6\n");
-//     return XDP_PASS;
-// }
+    bpf_tail_call(ctx, &egress_prog_map, EGRESS_NAT);
+
+    return XDP_ABORTED;
+}
+SEC("xnat/ingress")
+int
+xnat_ingress(struct xdp_md *ctx) {
+    bpf_printk("INFO: xnat_ingress\n");
+    bpf_tail_call(ctx, &ingress_prog_map, 0);
+    return XDP_ABORTED;
+}
+SEC("xnat/egress")
+int
+xnat_egress(struct xdp_md *ctx) {
+    bpf_printk("INFO: xnat_egress\n");
+    bpf_tail_call(ctx, &egress_prog_map, 0);
+    return XDP_ABORTED;
+}
 
 char _license[] SEC("license") = "GPL";

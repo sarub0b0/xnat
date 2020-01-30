@@ -1,8 +1,9 @@
 #include <cstdio>
 #include <cstdlib>
-#include <string>
 #include <cstdint>
+#include <string>
 
+#include <errno.h>
 #include <unistd.h>
 #include <linux/perf_event.h>
 #include <linux/if_link.h>
@@ -29,10 +30,10 @@
 
 #define MAX_CPUS 128
 
-std::string pin_basedir      = "/sys/fs/bpf";
-std::string map_name         = "pcap_map";
-std::string default_filename = "xnat.pcap";
-std::string subdir           = "xnat";
+const std::string pin_basedir      = "/sys/fs/bpf";
+const std::string map_name         = "pcap_map";
+const std::string default_filename = "xnat.pcap";
+const std::string subdir           = "xnat";
 
 static int pmu_fds[MAX_CPUS];
 static struct perf_event_mmap_page *headers[MAX_CPUS];
@@ -82,7 +83,6 @@ open_bpf_map_file(std::string pin_dir,
                   struct bpf_map_info *info) {
 
     int fd  = -1;
-    int len = -1;
     int err = -1;
 
     std::string filename;
@@ -161,16 +161,17 @@ print_bpf_output(void *data, int size) {
     if (verbose) {
         printf("pkt len: %-5d bytes. hdr: ", e->pkt_len);
         int is_odd = e->pkt_len % 2;
-        for (int i = 0; i < e->pkt_len; i++) {
+        int len    = is_odd ? e->pkt_len - 1 : e->pkt_len;
+
+        for (int i = 0; i < len; i += 2) {
             if (i % 16 == 0) {
                 printf("\n\t 0x%04x: ", i);
             }
-            printf("%02x", e->pkt_data[i]);
-            if (is_odd == 0) {
-                printf("%02x", e->pkt_data[i + 1]);
-                i++;
-            }
+            printf("%02x%02x", e->pkt_data[i], e->pkt_data[i]);
             printf(" ");
+        }
+        if (is_odd) {
+            printf("%02x", e->pkt_data[len]);
         }
         printf("\n");
     }
@@ -322,11 +323,9 @@ const char short_options[] = "f:qh";
 int
 main(int argc, char *const argv[]) {
 
-    struct rlimit r          = {RLIM_INFINITY, RLIM_INFINITY};
     struct bpf_map_info info = {0};
     std::string filename;
     std::string pin_dir;
-    int err, len;
     int map_fd;
     int numcpus = bpf_num_possible_cpus();
 
@@ -338,7 +337,7 @@ main(int argc, char *const argv[]) {
 
     int c;
     while ((c = gopt.getopt_long(
-                argc, argv, short_options, long_options, NULL)) != -1) {
+                argc, argv, short_options, long_options, nullptr)) != -1) {
         switch (c) {
             case 'f':
                 filename = optarg;
@@ -373,11 +372,15 @@ main(int argc, char *const argv[]) {
     for (int i = 0; i < numcpus; i++)
         if (perf_event_mmap_header(pmu_fds[i], &headers[i]) < 0) return 1;
 
+    pd = nullptr;
+
     pd = pcap_open_dead(DLT_EN10MB, 65535);
     if (!pd) {
         err("pcap_open_dead failed");
         goto out;
     }
+
+    pdumper = nullptr;
 
     pdumper = pcap_dump_open(pd, filename.c_str());
     if (!pdumper) {

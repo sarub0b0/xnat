@@ -1,10 +1,11 @@
-#include <stdio.h>
-#include <stdlib.h>
+#include <cstdio>
+#include <cstdlib>
+#include <cstdint>
+#include <string>
+
 #include <time.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <stdint.h>
-#include <string.h>
 #include <net/if.h>
 #include <linux/if_ether.h>
 #include <bpf/bpf.h>
@@ -20,21 +21,25 @@
 #include "utils.h"
 #include "nat.h"
 #include "ifinfo.h"
+#include "prog.h"
 
-const char *pin_basedir        = "/sys/fs/bpf";
-const char *tx_map_name        = "tx_map";
-const char *redirect_map_name  = "redirect_params";
-const char *nat_map_name       = "nat_map";
-const char *port_pool_map_name = "port_pool_map";
-const char *freelist_map_name  = "freelist_map";
-const char *if_map_name        = "if_map";
+std::string pin_basedir           = "/sys/fs/bpf";
+std::string tx_map_name           = "tx_map";
+std::string redirect_map_name     = "redirect_params";
+std::string nat_map_name          = "nat_map";
+std::string port_pool_map_name    = "port_pool_map";
+std::string freelist_map_name     = "freelist_map";
+std::string if_map_name           = "if_map";
+std::string ingress_prog_map_name = "ingress_prog_map";
+std::string egress_prog_map_name  = "egress_prog_map";
 
-const char *i_ifname = "ens4";
-const char *e_ifname = "ens5";
+std::string i_ifname = "ens4";
+std::string e_ifname = "ens5";
 
-const char *sub_dir = "xnat";
+std::string sub_dir = "xnat";
 
-int register_ifinfo(int map_fd, int ifindex, const char *ifname) {
+int
+register_ifinfo(int map_fd, int ifindex, const std::string *ifname) {
 
     int err;
 
@@ -46,7 +51,7 @@ int register_ifinfo(int map_fd, int ifindex, const char *ifname) {
         return -1;
     }
 
-    strcpy(ifreq.ifr_name, ifname);
+    strcpy(ifreq.ifr_name, ifname->c_str());
 
     err = ioctl(sock, SIOCGIFHWADDR, &ifreq);
     if (err < 0) {
@@ -84,9 +89,75 @@ int register_ifinfo(int map_fd, int ifindex, const char *ifname) {
     return 0;
 }
 
-int main(int argc, char const *argv[]) {
+int
+init_prog_map(int ingress_fd, int egress_fd) {
+    int err;
 
-    char pin_dir[PATH_MAX];
+    int fd;
+    int id                    = 2315;
+    struct bpf_prog_info info = {0};
+
+    fd = bpf_prog_get_fd_by_id(id);
+    if (fd < 0) {
+        err("Failed prog get fd. id(%d)", id);
+        return -1;
+    }
+
+    uint32_t info_len = sizeof(info);
+
+    err = bpf_obj_get_info_by_fd(fd, &info, &info_len);
+    if (err) {
+        err("Cannot get prog info - %s", strerror(errno));
+    }
+
+    info("info id(%d)", info.id);
+    info("info type(%d)", info.type);
+    info("info name(%s)", info.name);
+    info("info ifindex(%d)", info.ifindex);
+    info("info jited_prog_len(%d)", info.jited_prog_len);
+
+    int obj_fd;
+    struct bpf_object *obj;
+    err = bpf_prog_load("xnat_kern.o", BPF_PROG_TYPE_XDP, &obj, &obj_fd);
+
+    struct bpf_program *bpf_prog;
+    const char *progsec = "INGRESS_NAT";
+    bpf_prog            = bpf_object__find_program_by_title(obj, progsec);
+    if (!bpf_prog) {
+        err("Couldn't find a program in ELF section '%s'", progsec);
+        return -1;
+    }
+
+    fd = bpf_program__fd(bpf_prog);
+    if (fd < 0) {
+        err("bpf_program__fd failed");
+        return EXIT_FAIL_BPF;
+    }
+
+    uint32_t key, prog;
+
+    key  = 0;
+    prog = fd;
+
+    err = bpf_map_update_elem(ingress_fd, &key, &prog, BPF_ANY);
+    if (err) {
+        err("Fail add INGRESS_NAT prog");
+        return -1;
+    }
+
+    prog = EGRESS_NAT;
+    err  = bpf_map_update_elem(egress_fd, &key, &prog, BPF_ANY);
+    if (err) {
+        err("Fail add EGRESS_NAT prog");
+        return -1;
+    }
+    return 0;
+}
+
+int
+main(int argc, char const *argv[]) {
+
+    std::string pin_dir;
     struct bpf_map_info info = {0};
     int tx_map_fd;
     int redirect_map_fd;
@@ -94,68 +165,95 @@ int main(int argc, char const *argv[]) {
     int port_pool_map_fd;
     int freelist_map_fd;
     int if_map_fd;
-    int len;
+    int ingress_prog_map_fd;
+    int egress_prog_map_fd;
 
     uint32_t i_ifindex, e_ifindex;
 
-    i_ifindex = if_nametoindex(i_ifname);
-    e_ifindex = if_nametoindex(e_ifname);
+    i_ifindex = if_nametoindex(i_ifname.c_str());
+    e_ifindex = if_nametoindex(e_ifname.c_str());
 
     if (!i_ifindex) {
-        err("Unknown interface %s", i_ifname);
+        err("Unknown interface %s", i_ifname.c_str());
         return EXIT_FAIL_OPTION;
     }
 
     if (!e_ifindex) {
-        err("Unknown interface %s", e_ifname);
+        err("Unknown interface %s", e_ifname.c_str());
         return EXIT_FAIL_OPTION;
     }
 
-    len = snprintf(pin_dir, PATH_MAX, "%s/%s", pin_basedir, sub_dir);
-    if (len < 0) {
+    pin_dir = pin_basedir + "/" + sub_dir;
+    if (pin_dir.length() < 0) {
         err("creating pin dirname");
         return EXIT_FAIL_OPTION;
     }
 
-    tx_map_fd = open_bpf_map_file(pin_dir, tx_map_name, &info);
+    tx_map_fd = open_bpf_map_file(&pin_dir, &tx_map_name, &info);
     if (tx_map_fd < 0) {
-        fprintf(stderr, "ERR: bpf_map__fd failed. [%s]\n", tx_map_name);
+        fprintf(stderr, "ERR: bpf_map__fd failed. [%s]\n", tx_map_name.c_str());
         return EXIT_FAIL_BPF;
     }
 
-    redirect_map_fd = open_bpf_map_file(pin_dir, redirect_map_name, &info);
+    redirect_map_fd = open_bpf_map_file(&pin_dir, &redirect_map_name, &info);
     if (redirect_map_fd < 0) {
-        fprintf(stderr, "ERR: bpf_map__fd failed. [%s]\n", redirect_map_name);
+        fprintf(stderr,
+                "ERR: bpf_map__fd failed. [%s]\n",
+                redirect_map_name.c_str());
         return EXIT_FAIL_BPF;
     }
 
-    port_pool_map_fd = open_bpf_map_file(pin_dir, port_pool_map_name, &info);
+    port_pool_map_fd = open_bpf_map_file(&pin_dir, &port_pool_map_name, &info);
     if (port_pool_map_fd < 0) {
-        fprintf(stderr, "ERR: bpf_map__fd failed. [%s]\n", port_pool_map_name);
+        fprintf(stderr,
+                "ERR: bpf_map__fd failed. [%s]\n",
+                port_pool_map_name.c_str());
         return EXIT_FAIL_BPF;
     }
 
-    freelist_map_fd = open_bpf_map_file(pin_dir, freelist_map_name, &info);
+    freelist_map_fd = open_bpf_map_file(&pin_dir, &freelist_map_name, &info);
     if (freelist_map_fd < 0) {
-        fprintf(stderr, "ERR: bpf_map__fd failed. [%s]\n", freelist_map_name);
+        fprintf(stderr,
+                "ERR: bpf_map__fd failed. [%s]\n",
+                freelist_map_name.c_str());
         return EXIT_FAIL_BPF;
     }
 
-    nat_map_fd = open_bpf_map_file(pin_dir, nat_map_name, &info);
+    nat_map_fd = open_bpf_map_file(&pin_dir, &nat_map_name, &info);
     if (nat_map_fd < 0) {
-        fprintf(stderr, "ERR: bpf_map__fd failed. [%s]\n", nat_map_name);
+        fprintf(
+            stderr, "ERR: bpf_map__fd failed. [%s]\n", nat_map_name.c_str());
         return EXIT_FAIL_BPF;
     }
 
-    if_map_fd = open_bpf_map_file(pin_dir, if_map_name, &info);
+    if_map_fd = open_bpf_map_file(&pin_dir, &if_map_name, &info);
     if (if_map_fd < 0) {
-        fprintf(stderr, "ERR: bpf_map__fd failed. [%s]\n", if_map_name);
+        fprintf(stderr, "ERR: bpf_map__fd failed. [%s]\n", if_map_name.c_str());
         return EXIT_FAIL_BPF;
     }
+
+    ingress_prog_map_fd =
+        open_bpf_map_file(&pin_dir, &ingress_prog_map_name, &info);
+    if (ingress_prog_map_fd < 0) {
+        fprintf(stderr,
+                "ERR: bpf_map__fd failed. [%s]\n",
+                ingress_prog_map_name.c_str());
+        return EXIT_FAIL_BPF;
+    }
+    egress_prog_map_fd =
+        open_bpf_map_file(&pin_dir, &egress_prog_map_name, &info);
+    if (egress_prog_map_fd < 0) {
+        fprintf(stderr,
+                "ERR: bpf_map__fd failed. [%s]\n",
+                egress_prog_map_name.c_str());
+        return EXIT_FAIL_BPF;
+    }
+
+    init_prog_map(ingress_prog_map_fd, egress_prog_map_fd);
 
     if (if_map_fd) {
-        register_ifinfo(if_map_fd, i_ifindex, i_ifname);
-        register_ifinfo(if_map_fd, e_ifindex, e_ifname);
+        register_ifinfo(if_map_fd, i_ifindex, &i_ifname);
+        register_ifinfo(if_map_fd, e_ifindex, &e_ifname);
     }
 
     if (redirect_map_fd) {
@@ -198,9 +296,9 @@ int main(int argc, char const *argv[]) {
         bpf_map_update_elem(tx_map_fd, &i_ifindex, &e_ifindex, 0);
         bpf_map_update_elem(tx_map_fd, &e_ifindex, &i_ifindex, 0);
         info("redirect from if(%s:%d) -> if(%s:%d)",
-             i_ifname,
+             i_ifname.c_str(),
              i_ifindex,
-             e_ifname,
+             e_ifname.c_str(),
              e_ifindex);
         info("\tDone");
     }

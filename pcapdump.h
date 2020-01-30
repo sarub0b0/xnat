@@ -22,6 +22,8 @@ struct bpf_map_def SEC("maps") pcap_map = {
     .max_entries = MAX_CPUS,
 };
 
+#define PROG(F) SEC(#F) int bpf_func_##F
+
 static __always_inline int
 pcap(struct xdp_md *ctx) {
     void *data_end = (void *) (long) ctx->data_end;
@@ -49,38 +51,6 @@ pcap(struct xdp_md *ctx) {
     }
 
     return 0;
-}
-
-
-// TODO tail_callで切り替えられるようにする
-SEC("pcap")
-int
-xnat_pcap(struct xdp_md *ctx) {
-    void *data_end = (void *) (long) ctx->data_end;
-    void *data     = (void *) (long) ctx->data;
-
-    if (data < data_end) {
-        __u64 flags = BPF_F_CURRENT_CPU;
-        __u16 size;
-        int ret;
-        struct S metadata;
-
-        metadata.cookie  = 0xdead;
-        metadata.pkt_ken = (__u16)(data_end - data);
-
-        size = min(metadata.pkt_ken, SAMPLE_SIZE);
-
-        flags |= (__u64) size << 32;
-
-        ret = bpf_perf_event_output(
-            ctx, &pcap_map, flags, &metadata, sizeof(metadata));
-
-        if (ret) {
-            bpf_printk("perf_event_output failed: %d\n", ret);
-        }
-    }
-
-    return XDP_PASS;
 }
 
 #endif /* end of include guard */

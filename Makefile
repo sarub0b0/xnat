@@ -2,31 +2,39 @@
 CC := clang
 LLC := llc
 # CFLAGS := -O2 -target bpf -Wall -DDEBUG
-CFLAGS := -O2 -emit-llvm -Wall
+CFLAGS := -O2 -emit-llvm -Wall -DDEBUG
 DEBUGFLAG := -g
 LLFLAGS := -march=bpf -filetype=obj
 # CFLAGS := -O2 -target bpf -Wall -DDEBUG
 
-all: xnat_kern xnat_user stats loader xnat_user
+CPP := clang++
+CPPFLAGS := -std=c++14 -O2 -stdlib=libc++
+
+all: xnat_kern xnat_stats loader xnat_user xnat_pcap
 
 xnat_kern:
 	$(CC) $(CFLAGS) $(DEBUGFLAG) -c xnat_kern.c -o -| $(LLC) $(LLFLAGS) -o xnat_kern.o
 .PHONY: xnat_kern
 
 xnat_user:
-	$(CC) xnat_user.c -o xnat_user -lbpf
+	$(CPP) $(CPPFLAGS) xnat_user.cc -o xnat_user -lbpf
 .PHONY: xnat_user
 
-stats:
-	$(CC) stats.c -o stats -lbpf
-.PHONY: stats
+xnat_pcap:
+	$(CPP) $(CPPFLAGS) xnat_pcap.cc -o xnat_pcap -lbpf -lpcap
+.PHONY: xnat_pcap
+
+
+xnat_stats:
+	$(CPP) $(CPPFLAGS) xnat_stats.cc -o xnat_stats -lbpf
+.PHONY: xnat_stats
 
 loader:
 	$(CC) loader.c -o loader -lbpf
 .PHONY: loader
 
 clean:
-	-rm stats loader xnat_user *.o
+	-rm xnat_kern xnat_pcap xnat_stats loader xnat_user *.o
 
 init:
 	-ip link add ingress_xnat type veth peer name host0
