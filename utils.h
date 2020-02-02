@@ -16,18 +16,23 @@
 #define XDP_ACTION_MAX (XDP_REDIRECT + 1)
 #endif
 
-#include <cstring>
+#include <cstdint>
+#include <string>
 
+#include <bpf/libbpf.h>
+#include <bpf/bpf.h>
 #include <errno.h>
+
+#include "message.h"
 
 static inline uint32_t
 bpf_num_possible_cpus(void) {
-    uint32_t cpus = libbpf_num_possible_cpus();
+    int cpus = libbpf_num_possible_cpus();
     if (cpus < 0) {
         err("Failed to get # of possible cpus: '%s'!", strerror(-cpus));
-        exit(1);
+        return 0;
     }
-    return cpus;
+    return static_cast<uint32_t>(cpus);
 }
 
 int
@@ -36,7 +41,6 @@ open_bpf_map_file(const std::string *pin_dir,
                   struct bpf_map_info *info) {
 
     int fd  = -1;
-    int len = -1;
     int err = -1;
 
     std::string filename;

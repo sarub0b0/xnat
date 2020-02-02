@@ -4,7 +4,7 @@
 #include <stdio.h>
 #define err(fmt...)                                               \
     do {                                                          \
-        fprintf(stderr, "ERR: %s, line%d: ", __FILE__, __LINE__); \
+        fprintf(stderr, "ERR: %s, line %d: ", __FILE__, __LINE__); \
         fprintf(stderr, fmt);                                     \
         fprintf(stderr, "\n");                                    \
     } while (0)

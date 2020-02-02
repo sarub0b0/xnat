@@ -1,3 +1,4 @@
+#pragma once
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
@@ -25,8 +26,15 @@
 #include <pcap/dlt.h>
 
 #include "message.h"
-#include "getopt_long.h"
-// #include "utils.h"
+#include "adapter.h"
+#include "config.h"
+#include "utils.h"
+
+#define EXIT_OK 0
+#define EXIT_FAIL 1
+#define EXIT_FAIL_OPTION 2
+#define EXIT_FAIL_XDP 30
+#define EXIT_FAIL_BPF 40
 
 #define MAX_CPUS 128
 
@@ -45,16 +53,6 @@ static uint32_t pcap_pkts;
 
 int verbose = 1;
 
-void
-usage(void) {
-    printf("Usage: ./xnat_pcap [options] (root permission)\n");
-    printf("\n");
-    printf("  Options:\n");
-    printf("    --filename, -f: pcap file name\n");
-    printf("    --quiet, -q: disable hex dump stdout\n");
-    printf("    --help,    -h: help\n");
-    printf("\n");
-}
 static int
 sys_perf_event_open(struct perf_event_attr *attr,
                     pid_t pid,
@@ -67,14 +65,38 @@ sys_perf_event_open(struct perf_event_attr *attr,
     return fd;
 }
 
-static inline uint32_t
-bpf_num_possible_cpus(void) {
-    uint32_t cpus = libbpf_num_possible_cpus();
-    if (cpus < 0) {
-        err("Failed to get # of possible cpus: '%s'!", hstrerror(-cpus));
-        exit(1);
+static int
+open_bpf_prog_file(std::string filename,
+                   std::string progsec,
+                   struct bpf_object **obj,
+                   struct bpf_program **prog,
+                   int *prog_fd,
+                   int *progsec_fd) {
+
+    int err;
+
+    err = bpf_prog_load(filename.c_str(), BPF_PROG_TYPE_XDP, obj, prog_fd);
+    if (*prog_fd < 0) {
+        err("failed to open bpf map file: %s err(%d):%s",
+            filename.c_str(),
+            errno,
+            hstrerror(errno));
+        return -1;
     }
-    return cpus;
+
+    *prog = bpf_object__find_program_by_title(*obj, progsec.c_str());
+    if (!prog) {
+        err("Couldn't find a program in ELF section '%s'", progsec.c_str());
+        return -1;
+    }
+
+    *progsec_fd = bpf_program__fd(*prog);
+    if (*progsec_fd < 0) {
+        err("bpf_program__fd failed");
+        return -1;
+    }
+
+    return 0;
 }
 
 static int
@@ -109,17 +131,29 @@ open_bpf_map_file(std::string pin_dir,
     return fd;
 }
 int
-do_attach(int idx, int fd, const char *name, uint32_t xdp_flags) {
+attach(int prog_fd, int map_fd) {
     int err = 0;
+    int key = 0;
 
-    return err;
+    err = bpf_map_update_elem(map_fd, &key, &prog_fd, BPF_ANY);
+    if (err) {
+        return -1;
+    }
+
+    return 0;
 }
 
 int
-do_detach(int idx, const char *name) {
+detach(int prog_fd, int map_fd) {
     int err = 0;
+    int key = 0;
 
-    return err;
+    err = bpf_map_delete_elem(map_fd, &key);
+    if (err) {
+        return -1;
+    }
+
+    return 0;
 }
 
 #define SAMPLE_SIZE 1024
@@ -311,91 +345,54 @@ perf_event_poller_multi(int *fds,
 
     return ret;
 }
-
-const struct option long_options[] = {
-    {"help", no_argument, NULL, 'h'},
-    {"filename", required_argument, NULL, 'f'},
-    {"quiet", no_argument, NULL, 'q'},
-};
-
-const char short_options[] = "f:qh";
-
 int
-main(int argc, char *const argv[]) {
+pin_maps_in_bpf_object(struct bpf_object *obj, const char *pin_dir) {
+    char map_filename[PATH_MAX];
+    int err, len;
+    struct bpf_map *map;
 
-    struct bpf_map_info info = {0};
-    std::string filename;
-    std::string pin_dir;
-    int map_fd;
-    int numcpus = bpf_num_possible_cpus();
+    info("map pinned dir (%s)", pin_dir);
 
-    filename = default_filename;
+    info("map-name [%s]", map_name.c_str());
 
-    enum bpf_perf_event_ret ret;
+    map = bpf_object__find_map_by_name(obj, map_name.c_str());
+    if (!map) {
+        fprintf(stderr,
+                "ERR: bpf_object__find_map_by_name failed. [%s]\n",
+                map_name.c_str());
+        return EXIT_FAIL_BPF;
+    }
 
-    pin_dir = pin_basedir + "/" + subdir;
+    len = snprintf(map_filename, PATH_MAX, "%s/%s", pin_dir, map_name.c_str());
+    if (len < 0) {
+        err("creating map name");
+        return EXIT_FAIL_OPTION;
+    }
 
-    int c;
-    while ((c = gopt.getopt_long(
-                argc, argv, short_options, long_options, nullptr)) != -1) {
-        switch (c) {
-            case 'f':
-                filename = optarg;
-                break;
-            case 'q':
-                verbose = 0;
-                break;
-            case 'h':
-                usage();
-                exit(1);
-            default:
-                usage();
-                exit(1);
+    if (access(map_filename, F_OK) != -1) {
+        info(" - Unpinning (remove) prev map in %s", map_filename);
+        err = bpf_map__unpin(map, map_filename);
+        if (err) {
+            err("Unpinning map in %s", map_filename);
+            return EXIT_FAIL_OPTION;
         }
     }
+    info(" - Pinning map in %s", map_filename);
 
-    map_fd = open_bpf_map_file(pin_dir, map_name, &info);
-
-    if (map_fd < 0) {
-        err("Cannot open %s", pin_dir.c_str());
-        return 1;
+    err = bpf_map__pin(map, map_filename);
+    if (err) {
+        return EXIT_FAIL_BPF;
     }
-
-    if (signal(SIGINT, sig_handler) || signal(SIGHUP, sig_handler) ||
-        signal(SIGTERM, sig_handler)) {
-        err("signal");
-        return 1;
-    }
-
-    test_bpf_perf_event(map_fd, numcpus);
-
-    for (int i = 0; i < numcpus; i++)
-        if (perf_event_mmap_header(pmu_fds[i], &headers[i]) < 0) return 1;
-
-    pd = nullptr;
-
-    pd = pcap_open_dead(DLT_EN10MB, 65535);
-    if (!pd) {
-        err("pcap_open_dead failed");
-        goto out;
-    }
-
-    pdumper = nullptr;
-
-    pdumper = pcap_dump_open(pd, filename.c_str());
-    if (!pdumper) {
-        err("pcap_dump_open failed");
-        goto out;
-    }
-
-    ret = perf_event_poller_multi(
-        pmu_fds, headers, numcpus, print_bpf_output, &done);
-
-    pcap_dump_close(pdumper);
-    pcap_close(pd);
-
-out:
-    info("");
-    info("%u packet samples stored in %s", pcap_pkts, filename.c_str());
-    return ret;
+    return 0;
 }
+class dump {
+   public:
+    dump(const struct config &config) : config_(config){};
+    ~dump();
+
+   private:
+    class adapter adapter_;
+    struct config config_;
+    int verbose_ = 0;
+};
+

@@ -10,15 +10,17 @@
 
 #include "bpf_helpers.h"
 #include "bpf_endian.h"
-#include "printk.h"
-#include "common.h"
 #include "define_kern.h"
+#include "printk.h"
+#include "checksum.h"
 #include "stats_kern.h"
 #include "parser.h"
 #include "ifinfo.h"
 #include "nat.h"
 #include "pcapdump.h"
-#include "prog.h"
+
+#include "ingress.h"
+#include "egress.h"
 
 #define offsetof(TYPE, MEMBER) ((size_t) & ((TYPE *) 0)->MEMBER)
 
@@ -40,20 +42,6 @@
 #define IS_PSEUDO 0x10
 
 #define PROG(F) SEC(#F) int bpf_func_##F
-
-struct bpf_map_def SEC("maps") ingress_prog_map = {
-    .type        = BPF_MAP_TYPE_PROG_ARRAY,
-    .key_size    = sizeof(__u32),
-    .value_size  = sizeof(__u32),
-    .max_entries = MAX_PROGS,
-};
-
-struct bpf_map_def SEC("maps") egress_prog_map = {
-    .type        = BPF_MAP_TYPE_PROG_ARRAY,
-    .key_size    = sizeof(__u32),
-    .value_size  = sizeof(__u32),
-    .max_entries = MAX_PROGS,
-};
 
 struct bpf_map_def SEC("maps") tx_map = {
     .type        = BPF_MAP_TYPE_DEVMAP,
@@ -697,9 +685,11 @@ egress_update_l4(struct hdr_cursor *nh,
     return 0;
 }
 
-PROG(INGRESS_NAT)(struct xdp_md *ctx) {
-    pcap(ctx);
+SEC("xnat/nat/ingress")
+int
+xnat_nat_ingress(struct xdp_md *ctx) {
 
+    bpf_printk("SEC: xnat/nat/ingress\n");
     struct nat_info nat = {0};
 
     void *data     = (void *) (long) ctx->data;
@@ -717,6 +707,8 @@ PROG(INGRESS_NAT)(struct xdp_md *ctx) {
     nh.pos              = data;
     ingress_ifindex     = ctx->ingress_ifindex;
     nat.ingress_ifindex = ingress_ifindex;
+
+    bpf_printk("INFO: ingress ifindex(%d)\n", ingress_ifindex);
 
     egress_ifindex = bpf_map_lookup_elem(&tx_map, &ingress_ifindex);
     if (!egress_ifindex) {
@@ -813,12 +805,13 @@ out:
     // return action;
 }
 
-PROG(EGRESS_NAT)(struct xdp_md *ctx) {
-    pcap(ctx);
+SEC("xnat/nat/egress")
+int
+xnat_nat_egress(struct xdp_md *ctx) {
 
     int action = XDP_PASS;
 
-    bpf_printk("xnat/egress\n");
+    bpf_printk("SEC: xnat/nat/egress\n");
 
     void *data     = (void *) (long) ctx->data;
     void *data_end = (void *) (long) ctx->data_end;
@@ -832,6 +825,7 @@ PROG(EGRESS_NAT)(struct xdp_md *ctx) {
 
     nh.pos         = data;
     egress_ifindex = ctx->ingress_ifindex;
+    bpf_printk("INFO: egress ifindex(%d)\n", egress_ifindex);
 
     // VLAN剥がす
     h_proto = parse_ethhdr(&nh, data_end, &eth);
@@ -933,33 +927,18 @@ err:
 out:
     return stats(ctx, &stats_map, action);
 }
-PROG(INGRESS_PCAP)(struct xdp_md *ctx) {
-    bpf_printk("INFO: INGRESS_PCAP\n");
-    pcap(ctx);
 
-    bpf_tail_call(ctx, &ingress_prog_map, INGRESS_NAT);
-
-    return XDP_ABORTED;
-}
-PROG(EGRESS_PCAP)(struct xdp_md *ctx) {
-    bpf_printk("INFO: EGRESS_PCAP\n");
-    pcap(ctx);
-
-    bpf_tail_call(ctx, &egress_prog_map, EGRESS_NAT);
-
-    return XDP_ABORTED;
-}
-SEC("xnat/ingress")
+SEC("xnat/root/ingress")
 int
-xnat_ingress(struct xdp_md *ctx) {
-    bpf_printk("INFO: xnat_ingress\n");
+xnat_root_ingress(struct xdp_md *ctx) {
+    bpf_printk("SEC: xnat/root/ingress\n");
     bpf_tail_call(ctx, &ingress_prog_map, 0);
     return XDP_ABORTED;
 }
-SEC("xnat/egress")
+SEC("xnat/root/egress")
 int
-xnat_egress(struct xdp_md *ctx) {
-    bpf_printk("INFO: xnat_egress\n");
+xnat_root_egress(struct xdp_md *ctx) {
+    bpf_printk("SEC: xnat/root/egress\n");
     bpf_tail_call(ctx, &egress_prog_map, 0);
     return XDP_ABORTED;
 }

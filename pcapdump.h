@@ -4,6 +4,10 @@
 #include <linux/bpf.h>
 
 #include "bpf_helpers.h"
+#include "bpf_endian.h"
+
+#include "egress.h"
+#include "ingress.h"
 
 #define MAX_CPUS 128
 #define SAMPLE_SIZE 1024ul
@@ -22,10 +26,8 @@ struct bpf_map_def SEC("maps") pcap_map = {
     .max_entries = MAX_CPUS,
 };
 
-#define PROG(F) SEC(#F) int bpf_func_##F
-
 static __always_inline int
-pcap(struct xdp_md *ctx) {
+dump(struct xdp_md *ctx) {
     void *data_end = (void *) (long) ctx->data_end;
     void *data     = (void *) (long) ctx->data;
 
@@ -52,5 +54,24 @@ pcap(struct xdp_md *ctx) {
 
     return 0;
 }
+SEC("xnat/dump/ingress") int xdp_ingress_dump(struct xdp_md *ctx) {
+    bpf_printk("SEC: xnat/dump/ingress\n");
 
+    dump(ctx);
+
+    bpf_tail_call(ctx, &ingress_prog_map, 1);
+
+    return XDP_ABORTED;
+}
+
+SEC("xnat/dump/egress") int xdp_egress_dump(struct xdp_md *ctx) {
+
+    bpf_printk("SEC: xnat/dump/ingress\n");
+
+    dump(ctx);
+
+    bpf_tail_call(ctx, &egress_prog_map, 1);
+
+    return XDP_ABORTED;
+}
 #endif /* end of include guard */
