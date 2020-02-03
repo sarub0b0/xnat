@@ -1,5 +1,6 @@
 #pragma once
 
+#define _GNU_SOURCE 1
 #include <cstdio>
 #include <cstdlib>
 #include <cstdint>
@@ -45,72 +46,68 @@
 
 #define EV_MAX 16
 
+using namespace grpc;
+
 namespace xnat {
 
 class xnat;
 
 class XnatServiceImpl final : public XnatService::Service {
    public:
-    XnatServiceImpl() {
-    }
-    ~XnatServiceImpl() {
-    }
-    ::grpc::Status EnableDumpMode(::grpc::ServerContext context,
-                                  const Empty *request,
-                                  Bool *response);
+    Status EnableDumpMode(ServerContext *context,
+                          const Empty *request,
+                          Bool *response) override;
 
-    ::grpc::Status DisableDumpMode(::grpc::ServerContext context,
-                                   const Empty *empty,
-                                   Bool *boolean);
+    Status DisableDumpMode(ServerContext *context,
+                           const Empty *request,
+                           Bool *response) override;
 
-    ::grpc::Status EnableStatusMode(::grpc::ServerContext context,
-                                    const Empty *empty,
-                                    Bool *boolean);
+    Status EnableStatsMode(ServerContext *context,
+                           const Empty *request,
+                           Bool *response) override;
 
-    ::grpc::Status DisableStatusMode(::grpc::ServerContext context,
-                                     const Empty *empty,
-                                     Bool *boolean);
-
-    void
-    set_xnat(class xnat *xnat) {
-        xnat_ = xnat;
-    };
+    Status DisableStatsMode(ServerContext *context,
+                            const Empty *request,
+                            Bool *response) override;
 
    private:
-    class xnat *xnat_;
 };
 
-::grpc::Status
-XnatServiceImpl::EnableDumpMode(::grpc::ServerContext context,
-                                const Empty *empty,
-                                Bool *boolean) {
-    boolean->set_success(true);
-    return ::grpc::Status::OK;
+Status
+XnatServiceImpl::EnableDumpMode(ServerContext *context,
+                                const Empty *request,
+                                Bool *response) {
+    info("EnableDumpMode");
+    response->set_success(true);
+    return Status::OK;
 }
 
-::grpc::Status
-XnatServiceImpl::DisableDumpMode(::grpc::ServerContext context,
-                                 const Empty *empty,
-                                 Bool *boolean) {
+Status
+XnatServiceImpl::DisableDumpMode(ServerContext *context,
+                                 const Empty *request,
+                                 Bool *response) {
 
-    boolean->set_success(true);
-    return ::grpc::Status::OK;
+    info("DisableDumpMode");
+    response->set_success(true);
+    return Status::OK;
 }
-::grpc::Status
-XnatServiceImpl::EnableStatusMode(::grpc::ServerContext context,
-                                  const Empty *empty,
-                                  Bool *boolean) {
+Status
+XnatServiceImpl::EnableStatsMode(ServerContext *context,
+                                 const Empty *request,
+                                 Bool *response) {
 
-    boolean->set_success(true);
-    return ::grpc::Status::OK;
+    info("EnableStatsMode");
+    response->set_success(true);
+    return Status::OK;
 }
-::grpc::Status
-XnatServiceImpl::DisableStatusMode(::grpc::ServerContext context,
-                                   const Empty *empty,
-                                   Bool *boolean) {
+Status
+XnatServiceImpl::DisableStatsMode(ServerContext *context,
+                                  const Empty *request,
+                                  Bool *response) {
 
-    boolean->set_success(true);
-    return ::grpc::Status::OK;
+    info("DisableStatsMode");
+    response->set_success(true);
+    return Status::OK;
 }
 
 class xnat {
@@ -130,7 +127,7 @@ class xnat {
     int event_loop();
     int init_maps();
     int setup_grpc();
-    int run_grpc_server();
+    static void *run_grpc_server(void *args);
 
    private:
     int _epoll_add(int ep, int fd, uintptr_t ptr);
@@ -154,32 +151,36 @@ class xnat {
     uint32_t egress_ifindex_;
     sigset_t sigset_;
 
-    std::string listen_address_;
+    static std::string listen_address_;
 
-    ::grpc::ServerBuilder builder_;
+    static ServerBuilder builder_;
     XnatServiceImpl xnat_service_;
 };
+
+std::string xnat::listen_address_ = "0.0.0.0:0";
+ServerBuilder xnat::builder_;
 
 int
 xnat::setup_grpc() {
 
     listen_address_ = config_.listen_address;
 
-    builder_.AddListeningPort(listen_address_, ::grpc::InsecureServerCredentials());
+    builder_.AddListeningPort(listen_address_, InsecureServerCredentials());
     builder_.RegisterService(&xnat_service_);
 
     return SUCCESS;
 }
 
-int
-xnat::run_grpc_server() {
-    std::unique_ptr<::grpc::Server> server(builder_.BuildAndStart());
+void *
+xnat::run_grpc_server(void *args) {
+
+    std::unique_ptr<Server> server(builder_.BuildAndStart());
 
     info("Server listening on %s", listen_address_.c_str());
 
     server->Wait();
 
-    return SUCCESS;
+    pthread_exit(nullptr);
 }
 
 int
@@ -488,6 +489,14 @@ xnat::_event_poll() {
 
     struct epoll_event ev[EV_MAX];
 
+    pthread_t pt;
+    err = pthread_create(&pt, nullptr, xnat::run_grpc_server, this);
+
+    if (err != 0) {
+        err("failed to create thread");
+        return ERROR;
+    }
+
     while (1) {
         err = epoll_wait(ep_fd, ev, EV_MAX, 5000);
         if (err < 0) {
@@ -502,7 +511,14 @@ xnat::_event_poll() {
                 if (ev[i].data.fd == sig_fd) {
                     struct signalfd_siginfo s_buf;
                     err = read(sig_fd, &s_buf, sizeof(s_buf));
-                    info("Signal handled");
+
+                    info("");
+                    info("Received SIGINT");
+
+                    pthread_kill(pt, SIGINT);
+
+                    info("gRPC server stopped");
+
                     return SUCCESS;
                 } else {
                     ;
@@ -517,16 +533,17 @@ xnat::_event_poll() {
 int
 xnat::event_loop() {
 
-    info("Event loop");
-
     int err;
+
+    info("Event loop");
 
     err = _event_poll();
     if (err < 0) {
         throw "Event ERROR";
     }
 
-    info("epoll finished");
+    info("Event loop finished");
+
     return SUCCESS;
 }
 

@@ -13,8 +13,10 @@ message Bool {
 
 service XnatService {
     rpc EnableDumpMode (Empty) returns (Bool);
+
     rpc DisableDumpMode (Empty) returns (Bool);
 
     rpc EnableStatsMode (Empty) returns (Bool);
+
     rpc DisableStatsMode (Empty) returns (Bool);
 }

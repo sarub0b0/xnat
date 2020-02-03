@@ -117,9 +117,9 @@ main(int argc, char *const *argv) {
         xnat.init_maps();
 
         xnat.setup_grpc();
-        xnat.run_grpc_server();
+        // xnat.run_grpc_server();
 
-        // xnat.event_loop();
+        xnat.event_loop();
 
     } catch (std::string &e) {
         err("%s", e.c_str());

@@ -3,7 +3,6 @@
 #include <cstdlib>
 #include <cstdint>
 #include <string>
-#include <stdexcept>
 
 #include <errno.h>
 #include <unistd.h>
@@ -26,16 +25,23 @@
 #include <pcap/pcap.h>
 #include <pcap/dlt.h>
 
+#include <grpcpp/grpcpp.h>
+
 #include "message.h"
-#include "adapter.h"
-// #include "config.h"
 #include "utils.h"
+#include "adapter.h"
+
+#include "xnat.grpc.pb.h"
+
+using namespace grpc;
+
 struct config {
     std::string map_pin_dir;
     std::string map_name;
     std::string dumpfile;
     std::string pin_basedir;
     std::string subdir;
+    std::string server_address;
     int verbose;
     int nr_cpus;
 };
@@ -71,6 +77,39 @@ struct lost {
     uint64_t lost;
 };
 
+class XnatClient {
+   public:
+    XnatClient(std::shared_ptr<::grpc::ChannelInterface> channel)
+        : client_(XnatService::NewStub(channel)){};
+
+    int EnableDumpMode();
+
+   private:
+    std::unique_ptr<XnatService::Stub> client_;
+};
+
+int
+XnatClient::EnableDumpMode() {
+    Empty empty;
+    Bool boolean;
+    ClientContext context;
+
+    info("stub->EnableDumpMode");
+
+    Status status = client_->EnableDumpMode(&context, empty, &boolean);
+
+    if (status.ok()) {
+        info("reply ok");
+        return SUCCESS;
+    } else {
+        err("error code(%d):%s %s",
+            status.error_code(),
+            status.error_message().c_str(),
+            status.error_details().c_str());
+        return ERROR;
+    }
+}
+
 class dump {
 
    public:
@@ -87,6 +126,9 @@ class dump {
     int open_pcap();
     void close_pcap();
     void print_result();
+
+    int setup_grpc();
+    int enable_dump_mode();
 
     enum bpf_perf_event_ret perf_event_poller_multi();
 
@@ -125,6 +167,9 @@ class dump {
     int map_fd_;
 
     static int done_;
+
+    std::unique_ptr<XnatClient> client_;
+    std::string server_address_;
 };
 
 int dump::done_               = 0;
@@ -133,6 +178,25 @@ uint32_t dump::pcap_pkts_     = 0;
 pcap_dumper_t *dump::pdumper_ = nullptr;
 
 dump::~dump() {
+}
+
+int
+dump::setup_grpc() {
+
+    server_address_ = config_.server_address;
+    client_         = std::make_unique<XnatClient>(XnatClient(
+        CreateChannel(server_address_, InsecureChannelCredentials())));
+
+    info("Connect to %s", server_address_.c_str());
+
+    return SUCCESS;
+}
+
+int
+dump::enable_dump_mode() {
+    client_->EnableDumpMode();
+
+    return SUCCESS;
 }
 
 void
@@ -267,7 +331,7 @@ dump::perf_event_mmap() {
     for (int i = 0; i < nr_cpus_; i++)
         if (_perf_event_mmap_header(pmu_fds_[i], &headers_[i]) < 0)
             throw std::string("failed perf_event_mmap_header index:" +
-                                     std::to_string(i));
+                              std::to_string(i));
     return SUCCESS;
 }
 

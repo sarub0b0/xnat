@@ -1,4 +1,4 @@
 let g:ale_linters = {'c': ['clang'], 'cpp': ['clang']}
 let g:ale_c_clang_options = '-target bpf -Wall'
-let g:ale_cpp_clang_options = '-std=c++14 -stdlib=libc++ -Wall -lbpf -lpcap -Wextra -Wendif-labels -Wfloat-equal -Wnon-virtual-dtor -Wold-style-cast -Wpointer-arith -Wredundant-decls -Wswitch-default -Wswitch-enum -Wvariadic-macros -Wwrite-strings -Wno-variadic-macros -Wno-unused-parameter -Wno-unused-variable'
+let g:ale_cpp_clang_options = '-std=c++14 -stdlib=libc++ -Wall -lbpf -lpcap -lpthread -Wextra -Wendif-labels -Wfloat-equal -Wnon-virtual-dtor -Wold-style-cast -Wpointer-arith -Wredundant-decls -Wswitch-default -Wswitch-enum -Wvariadic-macros -Wwrite-strings -Wno-variadic-macros -Wno-unused-parameter -Wno-unused-variable'
 

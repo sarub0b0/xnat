@@ -57,10 +57,12 @@ set_config(int argc, char *const argv[], struct config &cfg) {
         cfg.dumpfile = "/tmp/xnat.pcap";
     }
 
-    cfg.subdir      = "xnat";
-    cfg.map_name    = "pcap_map";
-    cfg.pin_basedir = "/sys/fs/bpf";
-    cfg.map_pin_dir = cfg.pin_basedir + "/" + cfg.subdir;
+    cfg.subdir         = "xnat";
+    cfg.map_name       = "pcap_map";
+    cfg.pin_basedir    = "/sys/fs/bpf";
+    cfg.map_pin_dir    = cfg.pin_basedir + "/" + cfg.subdir;
+    cfg.server_address = "localhost:10000";
+
     return SUCCESS;
 }
 
@@ -83,6 +85,8 @@ main(int argc, char *const argv[]) {
         dump.test_bpf_perf_event();
         dump.perf_event_mmap();
         dump.open_pcap();
+        dump.setup_grpc();
+        dump.enable_dump_mode();
         dump.perf_event_poller_multi();
 
     } catch (std::string &e) {

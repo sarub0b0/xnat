@@ -52,12 +52,13 @@ Mkfile.old
 dkms.conf
 
 
-loader
-xnat_user
 xnat_kern
-stats
-xnat
+xnat_stats
 xnat_dump
+xnat
+
+*.pb.cc
+*.pb.h
 
 GPATH
 GRTAGS

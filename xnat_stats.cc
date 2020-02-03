@@ -36,7 +36,41 @@ struct record {
 struct stats_record {
     struct record stats[XDP_ACTION_MAX];
 };
+int
+open_bpf_map_file(const std::string *pin_dir,
+                  const std::string *map_name,
+                  struct bpf_map_info *info) {
 
+    int fd  = -1;
+    int err = -1;
+
+    std::string filename;
+    uint32_t info_len = sizeof(*info);
+
+    filename = *pin_dir + "/" + *map_name;
+    if (filename.length() < 0) {
+        err("constructing full map_name path");
+        return -1;
+    }
+
+    fd = bpf_obj_get(filename.c_str());
+    if (fd < 0) {
+        err("failed to open bpf map file: %s err(%d):%s",
+            filename.c_str(),
+            errno,
+            strerror(errno));
+        return fd;
+    }
+    if (info) {
+        err = bpf_obj_get_info_by_fd(fd, info, &info_len);
+        if (err) {
+            err("%s() can't get info - %s", __func__, strerror(errno));
+            return EXIT_FAIL_BPF;
+        }
+    }
+
+    return fd;
+}
 const char *
 action2str(uint32_t action) {
     if (action < XDP_ACTION_MAX) {
