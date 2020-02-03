@@ -91,6 +91,7 @@ set_config(int argc, char *const *argv, struct config &cfg) {
     cfg.pin_basedir              = "/sys/fs/bpf";
     cfg.map_pin_dir              = cfg.pin_basedir + "/" + cfg.map_pin_dir;
     cfg.nr_cpus                  = bpf_num_possible_cpus();
+    cfg.listen_address           = "0.0.0.0:10000";
 
     return SUCCESS;
 }
@@ -106,7 +107,7 @@ main(int argc, char *const *argv) {
 
     if (set_config(argc, argv, config) < 0) return ERROR;
 
-    class xnat xnat(config);
+    class xnat::xnat xnat(config);
 
     try {
         xnat.load_bpf_progs();
@@ -115,11 +116,13 @@ main(int argc, char *const *argv) {
         xnat.set_xnat_to_prog_array();
         xnat.init_maps();
 
-        xnat.event_loop();
+        xnat.setup_grpc();
+        xnat.run_grpc_server();
 
-    } catch (const char *msg) {
-        err("%s", msg);
-        return ERROR;
+        // xnat.event_loop();
+
+    } catch (std::string &e) {
+        err("%s", e.c_str());
     }
 
     if (config.rm_flag) {

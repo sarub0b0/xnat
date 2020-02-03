@@ -34,6 +34,8 @@ class adapter {
     int map_delete_element(int fd, void *key);
     int map_get_next_key(int fd, void *key, void *next_key);
 
+    int open_bpf_map_file(const std::string &dir, const std::string &filename);
+
    private:
     class loader loader_;
 };
@@ -43,13 +45,7 @@ int
 adapter::load_bpf_prog(const std::string &obj_name,
                        const struct bpf_prog_load_attr &attr) {
 
-    int err;
-    err = loader_.bpf_prog_load(obj_name, attr);
-    if (err < 0) {
-        return ERROR;
-    }
-
-    return SUCCESS;
+    return loader_.bpf_prog_load(obj_name, attr);
 }
 
 int
@@ -96,21 +92,12 @@ adapter::attach_bpf_prog(int prog_fd,
 
 int
 adapter::attach_bpf_prog(int prog_fd, uint32_t ifindex, uint32_t xdp_flags) {
-    if (bpf_set_link_xdp_fd(ifindex, prog_fd, xdp_flags) < 0) {
-        err("Can't attach to interface %d", ifindex);
-        return ERROR;
-    }
-
-    return SUCCESS;
+    return bpf_set_link_xdp_fd(ifindex, prog_fd, xdp_flags);
 }
 
 int
 adapter::detach_bpf_prpg(int prog_fd, uint32_t ifindex, uint32_t xdp_flags) {
-    if (bpf_set_link_xdp_fd(ifindex, prog_fd, xdp_flags) < 0) {
-        err("Can't detach to interface %d", ifindex);
-        return ERROR;
-    }
-    return SUCCESS;
+    return bpf_set_link_xdp_fd(ifindex, prog_fd, xdp_flags);
 }
 
 int
@@ -205,3 +192,7 @@ adapter::map_get_next_key(int fd, void *key, void *next_key) {
     return err;
 }
 
+int
+adapter::open_bpf_map_file(const std::string &dir, const std::string &filename) {
+    return loader_.open_bpf_map_file(dir, filename);
+}

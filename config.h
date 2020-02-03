@@ -15,6 +15,7 @@ struct config {
     std::string load_obj_name;
     std::string map_pin_dir;
     std::string pin_basedir;
+    std::string listen_address;
     int rm_flag;
     uint32_t nr_cpus;
 };

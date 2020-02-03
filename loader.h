@@ -5,6 +5,7 @@
 #include <vector>
 #include <unordered_map>
 
+#include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <bpf/bpf.h>
@@ -29,6 +30,8 @@ class loader {
     struct bpf_object *get_object_by_name(const std::string &name);
     struct bpf_program *get_program_by_name(const std::string &name);
     struct bpf_map *get_map_by_name(const std::string &name);
+
+    int open_bpf_map_file(const std::string &dir, const std::string &filename);
 
     const std::unordered_map<std::string, int> &get_map_fds();
     const std::unordered_map<std::string, struct bpf_map *> &get_maps();
@@ -175,3 +178,24 @@ const std::unordered_map<std::string, struct bpf_map *> &
 loader::get_maps() {
     return maps_;
 }
+
+int
+loader::open_bpf_map_file(const std::string &dir, const std::string &filename) {
+    int fd;
+
+    std::string path = dir + "/" + filename;
+
+    fd = bpf_obj_get(path.c_str());
+    if (fd < 0) {
+        err("failed to open bpf map file: %s err(%d):%s",
+            path.c_str(),
+            errno,
+            strerror(errno));
+        return ERROR;
+    }
+
+    map_fds_[filename] = fd;
+
+    return SUCCESS;
+}
+

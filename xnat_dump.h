@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <cstdint>
 #include <string>
+#include <stdexcept>
 
 #include <errno.h>
 #include <unistd.h>
@@ -27,8 +28,17 @@
 
 #include "message.h"
 #include "adapter.h"
-#include "config.h"
+// #include "config.h"
 #include "utils.h"
+struct config {
+    std::string map_pin_dir;
+    std::string map_name;
+    std::string dumpfile;
+    std::string pin_basedir;
+    std::string subdir;
+    int verbose;
+    int nr_cpus;
+};
 
 #define EXIT_OK 0
 #define EXIT_FAIL 1
@@ -38,123 +48,7 @@
 
 #define MAX_CPUS 128
 
-const std::string pin_basedir      = "/sys/fs/bpf";
-const std::string map_name         = "pcap_map";
-const std::string default_filename = "xnat.pcap";
-const std::string subdir           = "xnat";
-
-static int pmu_fds[MAX_CPUS];
-static struct perf_event_mmap_page *headers[MAX_CPUS];
-static uint32_t prog_id;
-
-static pcap_t *pd;
-static pcap_dumper_t *pdumper;
-static uint32_t pcap_pkts;
-
-int verbose = 1;
-
-static int
-sys_perf_event_open(struct perf_event_attr *attr,
-                    pid_t pid,
-                    int cpu,
-                    int group_fd,
-                    unsigned long flags) {
-    int fd;
-
-    fd = syscall(__NR_perf_event_open, attr, pid, cpu, group_fd, flags);
-    return fd;
-}
-
-static int
-open_bpf_prog_file(std::string filename,
-                   std::string progsec,
-                   struct bpf_object **obj,
-                   struct bpf_program **prog,
-                   int *prog_fd,
-                   int *progsec_fd) {
-
-    int err;
-
-    err = bpf_prog_load(filename.c_str(), BPF_PROG_TYPE_XDP, obj, prog_fd);
-    if (*prog_fd < 0) {
-        err("failed to open bpf map file: %s err(%d):%s",
-            filename.c_str(),
-            errno,
-            hstrerror(errno));
-        return -1;
-    }
-
-    *prog = bpf_object__find_program_by_title(*obj, progsec.c_str());
-    if (!prog) {
-        err("Couldn't find a program in ELF section '%s'", progsec.c_str());
-        return -1;
-    }
-
-    *progsec_fd = bpf_program__fd(*prog);
-    if (*progsec_fd < 0) {
-        err("bpf_program__fd failed");
-        return -1;
-    }
-
-    return 0;
-}
-
-static int
-open_bpf_map_file(std::string pin_dir,
-                  std::string map_name,
-                  struct bpf_map_info *info) {
-
-    int fd  = -1;
-    int err = -1;
-
-    std::string filename;
-    uint32_t info_len = sizeof(*info);
-
-    filename = pin_dir + "/" + map_name;
-
-    fd = bpf_obj_get(filename.c_str());
-    if (fd < 0) {
-        err("failed to open bpf map file: %s err(%d):%s",
-            filename.c_str(),
-            errno,
-            hstrerror(errno));
-        return fd;
-    }
-    if (info) {
-        err = bpf_obj_get_info_by_fd(fd, info, &info_len);
-        if (err) {
-            err("%s() can't get info - %s", __func__, hstrerror(errno));
-            return -1;
-        }
-    }
-
-    return fd;
-}
-int
-attach(int prog_fd, int map_fd) {
-    int err = 0;
-    int key = 0;
-
-    err = bpf_map_update_elem(map_fd, &key, &prog_fd, BPF_ANY);
-    if (err) {
-        return -1;
-    }
-
-    return 0;
-}
-
-int
-detach(int prog_fd, int map_fd) {
-    int err = 0;
-    int key = 0;
-
-    err = bpf_map_delete_elem(map_fd, &key);
-    if (err) {
-        return -1;
-    }
-
-    return 0;
-}
+typedef enum bpf_perf_event_ret (*perf_event_print_fn)(void *data, int size);
 
 #define SAMPLE_SIZE 1024
 #define NANOSEC_PER_SEC 1000
@@ -165,9 +59,137 @@ struct sample {
     uint8_t pkt_data[SAMPLE_SIZE];
 } __attribute__((packed));
 
-static enum bpf_perf_event_ret
-print_bpf_output(void *data, int size) {
-    struct sample *e = (struct sample *) data;
+struct perf_event_sample {
+    struct perf_event_header header;
+    uint32_t size;
+    char data[];
+};
+
+struct lost {
+    struct perf_event_header header;
+    uint64_t id;
+    uint64_t lost;
+};
+
+class dump {
+
+   public:
+    dump(){};
+    ~dump();
+
+    void set_config(struct config &cfg);
+    int set_signal();
+    int open_bpf_map_file(const std::string &dir, const std::string &filename);
+    int attach();
+    int detach();
+    void test_bpf_perf_event();
+    int perf_event_mmap();
+    int open_pcap();
+    void close_pcap();
+    void print_result();
+
+    enum bpf_perf_event_ret perf_event_poller_multi();
+
+   private:
+    int _sys_perf_event_open(struct perf_event_attr &attr,
+                             pid_t pid,
+                             int cpu,
+                             int group_fd,
+                             uint32_t flags);
+    static enum bpf_perf_event_ret _print_bpf_output(void *data, int size);
+    static enum bpf_perf_event_ret _bpf_perf_event_print(
+        struct perf_event_header *hdr, void *private_data);
+
+    int _perf_event_mmap_header(int fd, struct perf_event_mmap_page **header);
+    static void _sig_handler(int signo);
+
+    class adapter adapter_;
+    struct config config_;
+    static int verbose_;
+
+    struct perf_event_attr perf_event_perf_attr_;
+    struct perf_event_mmap_page **headers_;
+
+    int pmu_fds_[MAX_CPUS];
+
+    pcap_t *pd_ = nullptr;
+    static pcap_dumper_t *pdumper_;
+
+    static uint32_t pcap_pkts_;
+
+    int page_size_;
+    int page_cnt_ = 8;
+
+    int nr_cpus_;
+
+    int map_fd_;
+
+    static int done_;
+};
+
+int dump::done_               = 0;
+int dump::verbose_            = 0;
+uint32_t dump::pcap_pkts_     = 0;
+pcap_dumper_t *dump::pdumper_ = nullptr;
+
+dump::~dump() {
+}
+
+void
+dump::set_config(struct config &cfg) {
+    config_ = cfg;
+}
+
+void
+dump::_sig_handler(int signo) {
+    done_ = 1;
+}
+
+int
+dump::set_signal() {
+    if (signal(SIGINT, _sig_handler) || signal(SIGHUP, _sig_handler) ||
+        signal(SIGTERM, _sig_handler)) {
+        err("signal");
+        return ERROR;
+    }
+
+    done_ = 0;
+
+    return SUCCESS;
+}
+
+int
+dump::_sys_perf_event_open(struct perf_event_attr &attr,
+                           pid_t pid,
+                           int cpu,
+                           int group_fd,
+                           uint32_t flags) {
+
+    return syscall(__NR_perf_event_open,
+                   &perf_event_perf_attr_,
+                   pid,
+                   cpu,
+                   group_fd,
+                   flags);
+}
+
+int
+dump::open_bpf_map_file(const std::string &dir, const std::string &filename) {
+
+    int err;
+    err = adapter_.open_bpf_map_file(dir, filename);
+    if (err < 0) {
+        throw std::string("Can't open " + dir + "/" + filename);
+    }
+
+    map_fd_ = adapter_.get_map_fd_by_name(config_.map_name);
+
+    return SUCCESS;
+}
+
+enum bpf_perf_event_ret
+dump::_print_bpf_output(void *data, int size) {
+    struct sample *e = static_cast<struct sample *>(data);
 
     struct pcap_pkthdr h = {
         .caplen = SAMPLE_SIZE,
@@ -192,7 +214,7 @@ print_bpf_output(void *data, int size) {
     h.ts.tv_sec  = ts.tv_sec;
     h.ts.tv_usec = ts.tv_nsec / NANOSEC_PER_SEC;
 
-    if (verbose) {
+    if (verbose_) {
         printf("pkt len: %-5d bytes. hdr: ", e->pkt_len);
         int is_odd = e->pkt_len % 2;
         int len    = is_odd ? e->pkt_len - 1 : e->pkt_len;
@@ -210,55 +232,18 @@ print_bpf_output(void *data, int size) {
         printf("\n");
     }
 
-    pcap_dump((unsigned char *) pdumper, &h, e->pkt_data);
-    pcap_pkts++;
+    pcap_dump(reinterpret_cast<unsigned char *>(pdumper_), &h, e->pkt_data);
+    pcap_pkts_++;
     return LIBBPF_PERF_EVENT_CONT;
 }
 
-static void
-test_bpf_perf_event(int map_fd, int num) {
-    struct perf_event_attr attr = {
-        .sample_type   = PERF_SAMPLE_RAW,
-        .type          = PERF_TYPE_SOFTWARE,
-        .config        = PERF_COUNT_SW_BPF_OUTPUT,
-        .wakeup_events = 1,
-    };
+enum bpf_perf_event_ret
+dump::_bpf_perf_event_print(struct perf_event_header *hdr, void *private_data) {
 
-    for (int i = 0; i < num; i++) {
-        int key    = i;
-        pmu_fds[i] = sys_perf_event_open(&attr, -1, i, -1, 0);
-
-        assert(pmu_fds[i] >= 0);
-        assert(bpf_map_update_elem(map_fd, &key, &pmu_fds[i], BPF_ANY) == 0);
-        ioctl(pmu_fds[i], PERF_EVENT_IOC_ENABLE, 0);
-    }
-}
-
-static int done;
-
-static void
-sig_handler(int signo) {
-    done = 1;
-}
-
-struct perf_event_sample {
-    struct perf_event_header header;
-    uint32_t size;
-    char data[];
-};
-
-struct lost {
-    struct perf_event_header header;
-    uint64_t id;
-    uint64_t lost;
-};
-
-typedef enum bpf_perf_event_ret (*perf_event_print_fn)(void *data, int size);
-
-static enum bpf_perf_event_ret
-bpf_perf_event_print(struct perf_event_header *hdr, void *private_data) {
-    struct perf_event_sample *e = (struct perf_event_sample *) hdr;
-    perf_event_print_fn fn      = (perf_event_print_fn) private_data;
+    struct perf_event_sample *e =
+        reinterpret_cast<struct perf_event_sample *>(hdr);
+    perf_event_print_fn fn =
+        reinterpret_cast<perf_event_print_fn>(private_data);
     enum bpf_perf_event_ret ret;
 
     if (e->header.type == PERF_RECORD_SAMPLE) {
@@ -267,7 +252,7 @@ bpf_perf_event_print(struct perf_event_header *hdr, void *private_data) {
             return ret;
         }
     } else if (e->header.type == PERF_RECORD_LOST) {
-        struct lost *lost = (struct lost *) e;
+        struct lost *lost = reinterpret_cast<struct lost *>(e);
 
         info("lost %lu events", lost->lost);
     } else {
@@ -277,63 +262,67 @@ bpf_perf_event_print(struct perf_event_header *hdr, void *private_data) {
     return LIBBPF_PERF_EVENT_CONT;
 }
 
-int page_size;
-int page_cnt = 8;
+int
+dump::perf_event_mmap() {
+    for (int i = 0; i < nr_cpus_; i++)
+        if (_perf_event_mmap_header(pmu_fds_[i], &headers_[i]) < 0)
+            throw std::string("failed perf_event_mmap_header index:" +
+                                     std::to_string(i));
+    return SUCCESS;
+}
 
 int
-perf_event_mmap_header(int fd, struct perf_event_mmap_page **header) {
+dump::_perf_event_mmap_header(int fd, struct perf_event_mmap_page **header) {
+
     void *base;
     int mmap_size;
 
-    page_size = getpagesize();
-    mmap_size = page_size * (page_cnt + 1);
+    page_size_ = getpagesize();
+    mmap_size  = page_size_ * (page_cnt_ + 1);
 
     base = mmap(NULL, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
     if (base == MAP_FAILED) {
-        err("mmap err");
-        return -1;
+        throw std::string("mmap err");
     }
 
-    *header = (struct perf_event_mmap_page *) base;
-    return 0;
+    *header = reinterpret_cast<struct perf_event_mmap_page *>(base);
+    return SUCCESS;
 }
 
 enum bpf_perf_event_ret
-perf_event_poller_multi(int *fds,
-                        struct perf_event_mmap_page **headers,
-                        int num_fds,
-                        perf_event_print_fn output_fn,
-                        int *done) {
+dump::perf_event_poller_multi() {
     enum bpf_perf_event_ret ret;
 
     struct pollfd *pfds;
     void *buf  = NULL;
     size_t len = 0;
 
-    pfds = new struct pollfd[num_fds];
+    pfds = new struct pollfd[nr_cpus_];
     if (!pfds) {
         return LIBBPF_PERF_EVENT_ERROR;
     }
 
-    for (int i = 0; i < num_fds; i++) {
-        pfds[i].fd     = fds[i];
+    for (int i = 0; i < nr_cpus_; i++) {
+        pfds[i].fd     = pmu_fds_[i];
         pfds[i].events = POLLIN;
     }
 
-    while (!*done) {
-        poll(pfds, num_fds, 1000);
-        for (int i = 0; i < num_fds; i++) {
+    verbose_ = config_.verbose;
+    while (!done_) {
+        poll(pfds, nr_cpus_, 1000);
+        for (int i = 0; i < nr_cpus_; i++) {
             if (!pfds[i].revents) {
                 continue;
             }
 
-            ret = bpf_perf_event_read_simple(headers[i],
-                                             page_cnt * page_size,
-                                             page_size,
-                                             &buf,
-                                             &len,
-                                             bpf_perf_event_print,
-                                             (void *) output_fn);
+            ret = bpf_perf_event_read_simple(
+                headers_[i],
+                page_cnt_ * page_size_,
+                page_size_,
+                &buf,
+                &len,
+                _bpf_perf_event_print,
+                reinterpret_cast<void *>(_print_bpf_output));
             if (ret != LIBBPF_PERF_EVENT_CONT) {
                 break;
             }
@@ -345,54 +334,63 @@ perf_event_poller_multi(int *fds,
 
     return ret;
 }
+
 int
-pin_maps_in_bpf_object(struct bpf_object *obj, const char *pin_dir) {
-    char map_filename[PATH_MAX];
-    int err, len;
-    struct bpf_map *map;
+dump::open_pcap() {
 
-    info("map pinned dir (%s)", pin_dir);
-
-    info("map-name [%s]", map_name.c_str());
-
-    map = bpf_object__find_map_by_name(obj, map_name.c_str());
-    if (!map) {
-        fprintf(stderr,
-                "ERR: bpf_object__find_map_by_name failed. [%s]\n",
-                map_name.c_str());
-        return EXIT_FAIL_BPF;
+    pd_ = pcap_open_dead(DLT_EN10MB, 65535);
+    if (!pd_) {
+        throw std::string("pcap_open_dead failed");
     }
 
-    len = snprintf(map_filename, PATH_MAX, "%s/%s", pin_dir, map_name.c_str());
-    if (len < 0) {
-        err("creating map name");
-        return EXIT_FAIL_OPTION;
+    pdumper_ = pcap_dump_open(pd_, config_.dumpfile.c_str());
+    if (!pdumper_) {
+        throw std::string("pcap_dump_open failed");
     }
 
-    if (access(map_filename, F_OK) != -1) {
-        info(" - Unpinning (remove) prev map in %s", map_filename);
-        err = bpf_map__unpin(map, map_filename);
-        if (err) {
-            err("Unpinning map in %s", map_filename);
-            return EXIT_FAIL_OPTION;
-        }
-    }
-    info(" - Pinning map in %s", map_filename);
-
-    err = bpf_map__pin(map, map_filename);
-    if (err) {
-        return EXIT_FAIL_BPF;
-    }
-    return 0;
+    return SUCCESS;
 }
-class dump {
-   public:
-    dump(const struct config &config) : config_(config){};
-    ~dump();
 
-   private:
-    class adapter adapter_;
-    struct config config_;
-    int verbose_ = 0;
-};
+void
+dump::close_pcap() {
+    pcap_dump_close(pdumper_);
+    pcap_close(pd_);
+}
 
+void
+dump::print_result() {
+    info("");
+    info(
+        "%u packet samples stored in %s", pcap_pkts_, config_.dumpfile.c_str());
+}
+int
+dump::attach() {
+    return SUCCESS;
+}
+int
+dump::detach() {
+
+    return SUCCESS;
+}
+
+void
+dump::test_bpf_perf_event() {
+
+    struct perf_event_attr attr = {
+        .sample_type   = PERF_SAMPLE_RAW,
+        .type          = PERF_TYPE_SOFTWARE,
+        .config        = PERF_COUNT_SW_BPF_OUTPUT,
+        .wakeup_events = 1,
+    };
+
+    for (int i = 0; i < nr_cpus_; i++) {
+        int key = i;
+
+        pmu_fds_[i] = _sys_perf_event_open(
+            attr, -1 /*pid*/, i /*cpu*/, -1 /*group_fd*/, 0);
+
+        assert(pmu_fds_[i] >= 0);
+        assert(bpf_map_update_elem(map_fd_, &key, &pmu_fds_[i], BPF_ANY) == 0);
+        ioctl(pmu_fds_[i], PERF_EVENT_IOC_ENABLE, 0);
+    }
+}

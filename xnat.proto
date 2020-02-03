@@ -1,0 +1,20 @@
+syntax = "proto3";
+// package xnat.grpc;
+
+message Empty{}
+
+message Mode {
+    string mode = 1;
+}
+
+message Bool {
+    bool success = 1;
+}
+
+service XnatService {
+    rpc EnableDumpMode (Empty) returns (Bool);
+    rpc DisableDumpMode (Empty) returns (Bool);
+
+    rpc EnableStatsMode (Empty) returns (Bool);
+    rpc DisableStatsMode (Empty) returns (Bool);
+}

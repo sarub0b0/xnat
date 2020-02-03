@@ -29,6 +29,8 @@
 #include <sys/epoll.h>
 #include <sys/signalfd.h>
 
+#include <grpcpp/grpcpp.h>
+
 #include "stats.h"
 #include "message.h"
 #include "utils.h"
@@ -39,12 +41,84 @@
 #include "adapter.h"
 #include "config.h"
 
+#include "xnat.grpc.pb.h"
+
 #define EV_MAX 16
+
+namespace xnat {
+
+class xnat;
+
+class XnatServiceImpl final : public XnatService::Service {
+   public:
+    XnatServiceImpl() {
+    }
+    ~XnatServiceImpl() {
+    }
+    ::grpc::Status EnableDumpMode(::grpc::ServerContext context,
+                                  const Empty *request,
+                                  Bool *response);
+
+    ::grpc::Status DisableDumpMode(::grpc::ServerContext context,
+                                   const Empty *empty,
+                                   Bool *boolean);
+
+    ::grpc::Status EnableStatusMode(::grpc::ServerContext context,
+                                    const Empty *empty,
+                                    Bool *boolean);
+
+    ::grpc::Status DisableStatusMode(::grpc::ServerContext context,
+                                     const Empty *empty,
+                                     Bool *boolean);
+
+    void
+    set_xnat(class xnat *xnat) {
+        xnat_ = xnat;
+    };
+
+   private:
+    class xnat *xnat_;
+};
+
+::grpc::Status
+XnatServiceImpl::EnableDumpMode(::grpc::ServerContext context,
+                                const Empty *empty,
+                                Bool *boolean) {
+    boolean->set_success(true);
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status
+XnatServiceImpl::DisableDumpMode(::grpc::ServerContext context,
+                                 const Empty *empty,
+                                 Bool *boolean) {
+
+    boolean->set_success(true);
+    return ::grpc::Status::OK;
+}
+::grpc::Status
+XnatServiceImpl::EnableStatusMode(::grpc::ServerContext context,
+                                  const Empty *empty,
+                                  Bool *boolean) {
+
+    boolean->set_success(true);
+    return ::grpc::Status::OK;
+}
+::grpc::Status
+XnatServiceImpl::DisableStatusMode(::grpc::ServerContext context,
+                                   const Empty *empty,
+                                   Bool *boolean) {
+
+    boolean->set_success(true);
+    return ::grpc::Status::OK;
+}
 
 class xnat {
    public:
-    xnat(const struct config &config) : config_(config){};
-    ~xnat(){};
+    xnat(const struct config &config) : config_(config) {
+    }
+    ~xnat() {
+    }
 
     int init();
     int load_bpf_progs();
@@ -55,15 +129,17 @@ class xnat {
     int set_xnat_to_prog_array();
     int event_loop();
     int init_maps();
+    int setup_grpc();
+    int run_grpc_server();
 
    private:
     int _epoll_add(int ep, int fd, uintptr_t ptr);
     int _set_signal();
-    int _event_poll();
     int _register_ifinfo(int fd, const char *ifname, uint32_t ifindex);
     int _update_prog_array(const std::string &map_name,
                            const std::string &progsec,
                            int index);
+    int _event_poll();
 
     int _init_if_map();
     int _init_tx_map();
@@ -77,7 +153,34 @@ class xnat {
     uint32_t ingress_ifindex_;
     uint32_t egress_ifindex_;
     sigset_t sigset_;
+
+    std::string listen_address_;
+
+    ::grpc::ServerBuilder builder_;
+    XnatServiceImpl xnat_service_;
 };
+
+int
+xnat::setup_grpc() {
+
+    listen_address_ = config_.listen_address;
+
+    builder_.AddListeningPort(listen_address_, ::grpc::InsecureServerCredentials());
+    builder_.RegisterService(&xnat_service_);
+
+    return SUCCESS;
+}
+
+int
+xnat::run_grpc_server() {
+    std::unique_ptr<::grpc::Server> server(builder_.BuildAndStart());
+
+    info("Server listening on %s", listen_address_.c_str());
+
+    server->Wait();
+
+    return SUCCESS;
+}
 
 int
 xnat::_epoll_add(int ep, int fd, uintptr_t ptr) {
@@ -146,7 +249,7 @@ xnat::load_bpf_progs() {
     int err;
     err = adapter_.load_bpf_prog(config_.load_obj_name, config_.prog_load_attr);
     if (err < 0) {
-        throw "failed load_bpf_prog";
+        throw std::string("failed load_bpf_prog " + config_.load_obj_name);
     }
     return SUCCESS;
 }
@@ -157,7 +260,8 @@ xnat::attach_bpf_progs() {
     ingress_ifindex_ = adapter_.attach_bpf_prog(
         config_.ingress_progsec, config_.ingress_ifname, config_.xdp_flags);
     if (ingress_ifindex_ < 0) {
-        throw "failed attach_bpf_prog to ingress";
+        throw std::string("failed attach_bpf_prog to ingress " +
+                          config_.ingress_ifname);
     }
     info("Attach to interface %s:id(%d)",
          config_.ingress_ifname.c_str(),
@@ -166,7 +270,8 @@ xnat::attach_bpf_progs() {
     egress_ifindex_ = adapter_.attach_bpf_prog(
         config_.egress_progsec, config_.egress_ifname, config_.xdp_flags);
     if (egress_ifindex_ < 0) {
-        throw "failed attach_bpf_prog to egress";
+        throw std::string("failed attach_bpf_prog to egress " +
+                          config_.egress_ifname);
     }
     info("Attach to interface %s:id(%d)",
          config_.egress_ifname.c_str(),
@@ -181,7 +286,8 @@ xnat::detach_bpf_progs() {
     err = adapter_.detach_bpf_prpg(
         -1, ingress_ifindex_, XDP_FLAGS_UPDATE_IF_NOEXIST | config_.xdp_flags);
     if (err < 0) {
-        throw "failed detach_bpf_prpg to ingress";
+        throw std::string("failed detach_bpf_prpg to ingress (" +
+                          std::to_string(ingress_ifindex_) + ")");
     }
     info("Detach to interface %s:id(%d)",
          config_.ingress_ifname.c_str(),
@@ -190,7 +296,8 @@ xnat::detach_bpf_progs() {
     err = adapter_.detach_bpf_prpg(
         -1, egress_ifindex_, XDP_FLAGS_UPDATE_IF_NOEXIST | config_.xdp_flags);
     if (err < 0) {
-        throw "failed detach_bpf_prpg to egress";
+        throw std::string("failed detach_bpf_prpg to egress (" +
+                          std::to_string(egress_ifindex_) + ")");
     }
     info("Detach to interface %s:id(%d)",
          config_.egress_ifname.c_str(),
@@ -207,7 +314,7 @@ xnat::pin_maps() {
 
     err = adapter_.pin_maps(config_.map_pin_dir);
     if (err < 0) {
-        throw "failed to pin maps";
+        throw std::string("failed to pin maps - " + config_.map_pin_dir);
     }
 
     return SUCCESS;
@@ -221,7 +328,7 @@ xnat::unpin_maps() {
 
     err = adapter_.unpin_maps(config_.load_obj_name, config_.map_pin_dir);
     if (err < 0) {
-        throw "failed to unpin maps";
+        throw std::string("failed to pin maps - " + config_.map_pin_dir);
     }
 
     return SUCCESS;
@@ -264,7 +371,7 @@ xnat::set_xnat_to_prog_array() {
 
     err = _update_prog_array(map_name, prog_name, index);
     if (err) {
-        throw "failed update ingress prog array map";
+        throw std::string("failed update " + map_name);
     }
 
     info(
@@ -275,7 +382,7 @@ xnat::set_xnat_to_prog_array() {
 
     err = _update_prog_array(map_name, prog_name, index);
     if (err) {
-        throw "failed update ingress prog array map";
+        throw std::string("failed update " + map_name);
     }
 
     info(
@@ -415,7 +522,6 @@ xnat::event_loop() {
     int err;
 
     err = _event_poll();
-
     if (err < 0) {
         throw "Event ERROR";
     }
@@ -510,13 +616,15 @@ xnat::_init_if_map() {
     err = _register_ifinfo(
         map_fd, config_.ingress_ifname.c_str(), ingress_ifindex_);
     if (err < 0) {
-        throw "Failed register ingress ifinfo";
+        throw std::string("Failed register ingress ifinfo " +
+                          config_.ingress_ifname);
     }
 
     err = _register_ifinfo(
         map_fd, config_.egress_ifname.c_str(), egress_ifindex_);
     if (err < 0) {
-        throw "Failed register egress ifinfo";
+        throw std::string("Failed register egress ifinfo " +
+                          config_.egress_ifname);
     }
 
     return SUCCESS;
@@ -588,3 +696,4 @@ xnat::_init_freelist() {
     return SUCCESS;
 }
 
+}; // namespace xnat
