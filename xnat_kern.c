@@ -17,10 +17,10 @@
 #include "parser.h"
 #include "ifinfo.h"
 #include "nat.h"
-#include "pcapdump.h"
-
 #include "ingress.h"
 #include "egress.h"
+
+#include "pcapdump.h"
 
 #define offsetof(TYPE, MEMBER) ((size_t) & ((TYPE *) 0)->MEMBER)
 
@@ -40,8 +40,6 @@
     (sizeof(struct ethhdr) + sizeof(struct iphdr) + \
      offsetof(struct tcphdr, dest))
 #define IS_PSEUDO 0x10
-
-#define PROG(F) SEC(#F) int bpf_func_##F
 
 struct bpf_map_def SEC("maps") tx_map = {
     .type        = BPF_MAP_TYPE_DEVMAP,
@@ -224,9 +222,6 @@ update_eth(struct ethhdr *eth,
 static __always_inline int
 update_ipv4_checksum(struct iphdr *old, struct iphdr *new) {
 
-    bpf_printk("old src ip(0x%x)\n", old->daddr);
-    bpf_printk("old dst ip(0x%x)\n", new->daddr);
-
     l3_csum_replace(&new->check, old->daddr, new->daddr, sizeof(new->daddr));
 
     return 0;
@@ -239,33 +234,6 @@ update_icmp_id(struct icmphdr *hdr, __be16 new_port) {
     return 0;
 }
 
-// static __always_inline int
-// update_icmp_checksum(struct icmphdr hdr, struct icmphdr *new_hdr) {
-
-//     __sum16 old_csum;
-
-//     old_csum = old_hdr->checksum;
-
-//     old_hdr->checksum = 0;
-//     new_hdr->checksum = 0;
-
-//     new_hdr->checksum =
-//         generic_checksum(new_hdr, old_hdr, sizeof(struct icmphdr), old_csum);
-
-//     return 0;
-// }
-
-// static __always_inline int
-// update_tcp_checksum(struct tcphdr *old, struct tcphdr *new) {
-//     __sum16 old_csum;
-//     old_csum = old->check;
-
-//     old->check = 0;
-//     new->check = 0;
-
-//     new->check = generic_checksum(new, old, sizeof(struct tcphdr), old_csum);
-//     return 0;
-// }
 static __always_inline __be16
 get_new_port(__be16 port_pool_key) {
     int err;
@@ -865,7 +833,7 @@ xnat_nat_egress(struct xdp_md *ctx) {
             goto err;
         }
 
-        bpf_printk("Look up nat-table (0x%x:%d)\n",
+        bpf_printk("INFO: Look up nat-table (0x%x:%d)\n",
                    bpf_ntohl(iph->daddr),
                    bpf_ntohs(l4_port));
 

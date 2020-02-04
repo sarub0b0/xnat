@@ -138,7 +138,6 @@ static __always_inline int
 // flags) {
 l4_csum_replace(__sum16 *sum, __u64 old_value, __u64 new_value, __u64 flags) {
 
-    bpf_printk("old (0x%x) new(0x%x)\n", old_value, new_value);
 
     bool is_pseudo = flags & BPF_F_PSEUDO_HDR;
     bool is_mmzero = flags & BPF_F_MARK_MANGLED_0;

@@ -66,7 +66,7 @@ SEC("xnat/dump/ingress") int xdp_ingress_dump(struct xdp_md *ctx) {
 
 SEC("xnat/dump/egress") int xdp_egress_dump(struct xdp_md *ctx) {
 
-    bpf_printk("SEC: xnat/dump/ingress\n");
+    bpf_printk("SEC: xnat/dump/egress\n");
 
     dump(ctx);
 

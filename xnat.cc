@@ -98,6 +98,13 @@ set_config(int argc, char *const *argv, struct config &cfg) {
 
 int
 main(int argc, char *const *argv) {
+
+    struct rlimit lck_mem = {RLIM_INFINITY, RLIM_INFINITY};
+    if (setrlimit(RLIMIT_MEMLOCK, &lck_mem)) {
+        err("Can't change limit for locked memory");
+        return ERROR;
+    }
+
     struct config config = {};
 
     if (argc == 1) {

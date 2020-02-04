@@ -76,12 +76,6 @@ loader::bpf_prog_load(const std::string &obj_name,
         return ERROR;
     }
 
-    // err = ::bpf_prog_load(obj_name.c_str(), BPF_PROG_TYPE_XDP, &obj, &fd);
-    // if (err) {
-    //     err("bpf_prog_load faild");
-    //     return ERROR;
-    // }
-
     objects_[obj_name]  = obj;
     prog_fds_[obj_name] = fd;
 
@@ -91,7 +85,6 @@ loader::bpf_prog_load(const std::string &obj_name,
 
     bpf_object__for_each_program(prog, obj) {
         name = bpf_program__title(prog, false);
-        // prog = bpf_object__find_program_by_title(obj, name.c_str());
 
         if (!prog) {
             err("bpf_object__find_program_by_title failed. [%s]\n",
@@ -106,7 +99,6 @@ loader::bpf_prog_load(const std::string &obj_name,
 
     bpf_map__for_each(map, obj) {
         name = bpf_map__name(map);
-        // map  = bpf_object__find_map_by_name(obj, name.c_str());
 
         if (!map) {
             err("bpf_object__find_map_by_name failed. [%s]\n", name.c_str());
@@ -186,6 +178,7 @@ loader::open_bpf_map_file(const std::string &dir, const std::string &filename) {
     std::string path = dir + "/" + filename;
 
     fd = bpf_obj_get(path.c_str());
+
     if (fd < 0) {
         err("failed to open bpf map file: %s err(%d):%s",
             path.c_str(),

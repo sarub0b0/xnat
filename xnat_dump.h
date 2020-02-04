@@ -83,6 +83,7 @@ class XnatClient {
         : client_(XnatService::NewStub(channel)){};
 
     int EnableDumpMode();
+    int DisableDumpMode();
 
    private:
     std::unique_ptr<XnatService::Stub> client_;
@@ -90,16 +91,38 @@ class XnatClient {
 
 int
 XnatClient::EnableDumpMode() {
-    Empty empty;
-    Bool boolean;
+    Empty request;
+    Bool response;
     ClientContext context;
 
     info("stub->EnableDumpMode");
 
-    Status status = client_->EnableDumpMode(&context, empty, &boolean);
+    Status status = client_->EnableDumpMode(&context, request, &response);
 
     if (status.ok()) {
-        info("reply ok");
+        info("Reply success %s", std::to_string(response.success()).c_str());
+        return SUCCESS;
+    } else {
+        err("error code(%d):%s %s",
+            status.error_code(),
+            status.error_message().c_str(),
+            status.error_details().c_str());
+        return ERROR;
+    }
+}
+
+int
+XnatClient::DisableDumpMode() {
+    Empty request;
+    Bool response;
+    ClientContext context;
+
+    info("stub->DisableDumpMode");
+
+    Status status = client_->DisableDumpMode(&context, request, &response);
+
+    if (status.ok()) {
+        info("Reply success %s", std::to_string(response.success()).c_str());
         return SUCCESS;
     } else {
         err("error code(%d):%s %s",
@@ -113,7 +136,14 @@ XnatClient::EnableDumpMode() {
 class dump {
 
    public:
-    dump(){};
+    dump() {
+        attr_ = {
+            .sample_type   = PERF_SAMPLE_RAW,
+            .type          = PERF_TYPE_SOFTWARE,
+            .config        = PERF_COUNT_SW_BPF_OUTPUT,
+            .wakeup_events = 1,
+        };
+    };
     ~dump();
 
     void set_config(struct config &cfg);
@@ -129,15 +159,12 @@ class dump {
 
     int setup_grpc();
     int enable_dump_mode();
+    int disable_dump_mode();
 
     enum bpf_perf_event_ret perf_event_poller_multi();
 
    private:
-    int _sys_perf_event_open(struct perf_event_attr &attr,
-                             pid_t pid,
-                             int cpu,
-                             int group_fd,
-                             uint32_t flags);
+    int _sys_perf_event_open(pid_t pid, int cpu, int group_fd, uint32_t flags);
     static enum bpf_perf_event_ret _print_bpf_output(void *data, int size);
     static enum bpf_perf_event_ret _bpf_perf_event_print(
         struct perf_event_header *hdr, void *private_data);
@@ -149,9 +176,9 @@ class dump {
     struct config config_;
     static int verbose_;
 
-    struct perf_event_attr perf_event_perf_attr_;
-    struct perf_event_mmap_page **headers_;
+    struct perf_event_attr attr_;
 
+    struct perf_event_mmap_page *headers_[MAX_CPUS];
     int pmu_fds_[MAX_CPUS];
 
     pcap_t *pd_ = nullptr;
@@ -173,7 +200,7 @@ class dump {
 };
 
 int dump::done_               = 0;
-int dump::verbose_            = 0;
+int dump::verbose_            = 1;
 uint32_t dump::pcap_pkts_     = 0;
 pcap_dumper_t *dump::pdumper_ = nullptr;
 
@@ -194,14 +221,25 @@ dump::setup_grpc() {
 
 int
 dump::enable_dump_mode() {
-    client_->EnableDumpMode();
-
+    if (client_->EnableDumpMode() < 0) {
+        throw "Failed enable dump mode";
+    }
     return SUCCESS;
 }
 
+int
+dump::disable_dump_mode() {
+    if (client_->DisableDumpMode() < 0) {
+        throw "Failed disable dump mode";
+    }
+    return SUCCESS;
+}
 void
 dump::set_config(struct config &cfg) {
     config_ = cfg;
+
+    nr_cpus_ = cfg.nr_cpus;
+    verbose_ = cfg.verbose;
 }
 
 void
@@ -223,18 +261,9 @@ dump::set_signal() {
 }
 
 int
-dump::_sys_perf_event_open(struct perf_event_attr &attr,
-                           pid_t pid,
-                           int cpu,
-                           int group_fd,
-                           uint32_t flags) {
+dump::_sys_perf_event_open(pid_t pid, int cpu, int group_fd, uint32_t flags) {
 
-    return syscall(__NR_perf_event_open,
-                   &perf_event_perf_attr_,
-                   pid,
-                   cpu,
-                   group_fd,
-                   flags);
+    return syscall(__NR_perf_event_open, &attr_, pid, cpu, group_fd, flags);
 }
 
 int
@@ -287,7 +316,7 @@ dump::_print_bpf_output(void *data, int size) {
             if (i % 16 == 0) {
                 printf("\n\t 0x%04x: ", i);
             }
-            printf("%02x%02x", e->pkt_data[i], e->pkt_data[i]);
+            printf("%02x%02x", e->pkt_data[i], e->pkt_data[i + 1]);
             printf(" ");
         }
         if (is_odd) {
@@ -330,8 +359,7 @@ int
 dump::perf_event_mmap() {
     for (int i = 0; i < nr_cpus_; i++)
         if (_perf_event_mmap_header(pmu_fds_[i], &headers_[i]) < 0)
-            throw std::string("failed perf_event_mmap_header index:" +
-                              std::to_string(i));
+            throw "failed perf_event_mmap_header index:" + std::to_string(i);
     return SUCCESS;
 }
 
@@ -371,7 +399,10 @@ dump::perf_event_poller_multi() {
         pfds[i].events = POLLIN;
     }
 
-    verbose_ = config_.verbose;
+    info("");
+    info("Listening on xnat");
+    info("");
+
     while (!done_) {
         poll(pfds, nr_cpus_, 1000);
         for (int i = 0; i < nr_cpus_; i++) {
@@ -392,6 +423,8 @@ dump::perf_event_poller_multi() {
             }
         }
     }
+
+    info("");
 
     free(buf);
     delete pfds;
@@ -427,6 +460,7 @@ dump::print_result() {
     info(
         "%u packet samples stored in %s", pcap_pkts_, config_.dumpfile.c_str());
 }
+
 int
 dump::attach() {
     return SUCCESS;
@@ -440,21 +474,14 @@ dump::detach() {
 void
 dump::test_bpf_perf_event() {
 
-    struct perf_event_attr attr = {
-        .sample_type   = PERF_SAMPLE_RAW,
-        .type          = PERF_TYPE_SOFTWARE,
-        .config        = PERF_COUNT_SW_BPF_OUTPUT,
-        .wakeup_events = 1,
-    };
-
     for (int i = 0; i < nr_cpus_; i++) {
         int key = i;
 
-        pmu_fds_[i] = _sys_perf_event_open(
-            attr, -1 /*pid*/, i /*cpu*/, -1 /*group_fd*/, 0);
+        pmu_fds_[i] = _sys_perf_event_open(-1, i, -1, 0);
 
         assert(pmu_fds_[i] >= 0);
-        assert(bpf_map_update_elem(map_fd_, &key, &pmu_fds_[i], BPF_ANY) == 0);
+        assert(adapter_.map_update_element(
+                   map_fd_, &key, &pmu_fds_[i], BPF_ANY) == 0);
         ioctl(pmu_fds_[i], PERF_EVENT_IOC_ENABLE, 0);
     }
 }

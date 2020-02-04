@@ -159,40 +159,41 @@ adapter::get_map_fd_by_name(const std::string &name) {
 int
 adapter::map_update_element(int fd, void *key, void *value, uint32_t flags) {
     auto err = bpf_map_update_elem(fd, key, value, flags);
-    if (err) {
-        err("bpf_map_update_elem failed. %s", strerror(errno));
-    }
+    // if (err) {
+    //     err("bpf_map_update_elem failed. %s", strerror(errno));
+    // }
     return err;
 }
 
 int
 adapter::map_lookup_element(int fd, void *key, void *value) {
     auto err = bpf_map_lookup_elem(fd, key, value);
-    if (err) {
-        err("bpf_map_lookup_elem failed. %s", strerror(errno));
-    }
+    // if (err) {
+    //     err("bpf_map_lookup_elem failed. %s", strerror(errno));
+    // }
     return err;
 }
 
 int
 adapter::map_delete_element(int fd, void *key) {
     auto err = bpf_map_delete_elem(fd, key);
-    if (err) {
-        err("bpf_map_delete_elem failed. %s", strerror(errno));
-    }
+    // if (err) {
+    //     err("bpf_map_delete_elem failed. %s", strerror(errno));
+    // }
     return err;
 }
 
 int
 adapter::map_get_next_key(int fd, void *key, void *next_key) {
     auto err = bpf_map_get_next_key(fd, key, next_key);
-    if (err) {
-        err("bpf_map_get_next_key failed. %s", strerror(errno));
-    }
+    // if (err) {
+    //     err("bpf_map_get_next_key failed. %s", strerror(errno));
+    // }
     return err;
 }
 
 int
-adapter::open_bpf_map_file(const std::string &dir, const std::string &filename) {
+adapter::open_bpf_map_file(const std::string &dir,
+                           const std::string &filename) {
     return loader_.open_bpf_map_file(dir, filename);
 }

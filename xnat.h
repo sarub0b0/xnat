@@ -11,6 +11,7 @@
 #include <time.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <linux/perf_event.h>
 #include <net/if.h>
 #include <linux/if_ether.h>
 #include <bpf/bpf.h>
@@ -23,6 +24,7 @@
 #include <sys/socket.h>
 #include <net/if.h>
 #include <sys/time.h>
+#include <sys/syscall.h>
 #include <sys/resource.h>
 
 #include <pthread.h>
@@ -45,15 +47,20 @@
 #include "xnat.grpc.pb.h"
 
 #define EV_MAX 16
+#define MAX_CPUS 128
 
 using namespace grpc;
 
 namespace xnat {
 
-class xnat;
+class xnat final : public XnatService::Service {
 
-class XnatServiceImpl final : public XnatService::Service {
    public:
+    xnat(const struct config &config) : config_(config) {
+    }
+    ~xnat() {
+    }
+
     Status EnableDumpMode(ServerContext *context,
                           const Empty *request,
                           Bool *response) override;
@@ -70,53 +77,6 @@ class XnatServiceImpl final : public XnatService::Service {
                             const Empty *request,
                             Bool *response) override;
 
-   private:
-};
-
-Status
-XnatServiceImpl::EnableDumpMode(ServerContext *context,
-                                const Empty *request,
-                                Bool *response) {
-    info("EnableDumpMode");
-    response->set_success(true);
-    return Status::OK;
-}
-
-Status
-XnatServiceImpl::DisableDumpMode(ServerContext *context,
-                                 const Empty *request,
-                                 Bool *response) {
-
-    info("DisableDumpMode");
-    response->set_success(true);
-    return Status::OK;
-}
-Status
-XnatServiceImpl::EnableStatsMode(ServerContext *context,
-                                 const Empty *request,
-                                 Bool *response) {
-
-    info("EnableStatsMode");
-    response->set_success(true);
-    return Status::OK;
-}
-Status
-XnatServiceImpl::DisableStatsMode(ServerContext *context,
-                                  const Empty *request,
-                                  Bool *response) {
-
-    info("DisableStatsMode");
-    response->set_success(true);
-    return Status::OK;
-}
-
-class xnat {
-   public:
-    xnat(const struct config &config) : config_(config) {
-    }
-    ~xnat() {
-    }
-
     int init();
     int load_bpf_progs();
     int attach_bpf_progs();
@@ -127,6 +87,7 @@ class xnat {
     int event_loop();
     int init_maps();
     int setup_grpc();
+
     static void *run_grpc_server(void *args);
 
    private:
@@ -137,6 +98,8 @@ class xnat {
                            const std::string &progsec,
                            int index);
     int _event_poll();
+    int _enable_dump_mode();
+    int _disable_dump_mode();
 
     int _init_if_map();
     int _init_tx_map();
@@ -151,14 +114,145 @@ class xnat {
     uint32_t egress_ifindex_;
     sigset_t sigset_;
 
+    int ingress_prog_array_map_fd_;
+    int ingress_dump_fd_;
+    int ingress_nat_fd_;
+
+    int egress_prog_array_map_fd_;
+    int egress_dump_fd_;
+    int egress_nat_fd_;
+
+    int pmu_fds_[MAX_CPUS];
+
     static std::string listen_address_;
 
     static ServerBuilder builder_;
-    XnatServiceImpl xnat_service_;
 };
 
 std::string xnat::listen_address_ = "0.0.0.0:0";
 ServerBuilder xnat::builder_;
+
+Status
+xnat::EnableDumpMode(ServerContext *context,
+                     const Empty *request,
+                     Bool *response) {
+    info("Call EnableDumpMode");
+
+    if (_enable_dump_mode() < 0) {
+        response->set_success(false);
+    } else {
+        response->set_success(true);
+    }
+
+    return Status::OK;
+}
+
+Status
+xnat::DisableDumpMode(ServerContext *context,
+                      const Empty *request,
+                      Bool *response) {
+
+    info("Call DisableDumpMode");
+    if (_disable_dump_mode() < 0) {
+        response->set_success(false);
+    }
+    response->set_success(true);
+    return Status::OK;
+}
+
+Status
+xnat::EnableStatsMode(ServerContext *context,
+                      const Empty *request,
+                      Bool *response) {
+
+    info("Call EnableStatsMode");
+
+    response->set_success(true);
+    return Status::OK;
+}
+
+Status
+xnat::DisableStatsMode(ServerContext *context,
+                       const Empty *request,
+                       Bool *response) {
+
+    info("Call DisableStatsMode");
+    response->set_success(true);
+    return Status::OK;
+}
+
+int
+xnat::_enable_dump_mode() {
+
+    // ingress_prog_map[0] = dump;
+    // ingress_prog_map[1] = nat;
+
+    // egress_prog_map[0] = dump;
+    // egress_prog_map[1] = nat;
+
+    uint32_t key;
+
+    key = 1;
+    if (adapter_.map_update_element(
+            ingress_prog_array_map_fd_, &key, &ingress_nat_fd_, BPF_ANY)) {
+        err("err 1");
+        return ERROR;
+    }
+    if (adapter_.map_update_element(
+            egress_prog_array_map_fd_, &key, &egress_nat_fd_, BPF_ANY)) {
+        err("err 2");
+        return ERROR;
+    }
+
+    key = 0;
+    if (adapter_.map_update_element(
+            ingress_prog_array_map_fd_, &key, &ingress_dump_fd_, BPF_ANY)) {
+        err("err 3");
+        return ERROR;
+    }
+
+    if (adapter_.map_update_element(
+            egress_prog_array_map_fd_, &key, &egress_dump_fd_, BPF_ANY)) {
+        err("err 4");
+        return ERROR;
+    }
+
+    return SUCCESS;
+}
+
+int
+xnat::_disable_dump_mode() {
+
+    // ingress_prog_map[0] = nat;
+    // egress_prog_map[0] = nat;
+
+    uint32_t key;
+
+    key = 1;
+    if (adapter_.map_delete_element(ingress_prog_array_map_fd_, &key)) {
+        err("err 1");
+        return ERROR;
+    }
+    if (adapter_.map_delete_element(egress_prog_array_map_fd_, &key)) {
+        err("err 2");
+        return ERROR;
+    }
+
+    key = 0;
+    if (adapter_.map_update_element(
+            ingress_prog_array_map_fd_, &key, &ingress_nat_fd_, BPF_ANY)) {
+        err("err 3");
+        return ERROR;
+    }
+
+    if (adapter_.map_update_element(
+            egress_prog_array_map_fd_, &key, &egress_nat_fd_, BPF_ANY)) {
+        err("err 4");
+        return ERROR;
+    }
+
+    return SUCCESS;
+}
 
 int
 xnat::setup_grpc() {
@@ -166,7 +260,7 @@ xnat::setup_grpc() {
     listen_address_ = config_.listen_address;
 
     builder_.AddListeningPort(listen_address_, InsecureServerCredentials());
-    builder_.RegisterService(&xnat_service_);
+    builder_.RegisterService(this);
 
     return SUCCESS;
 }
@@ -250,8 +344,18 @@ xnat::load_bpf_progs() {
     int err;
     err = adapter_.load_bpf_prog(config_.load_obj_name, config_.prog_load_attr);
     if (err < 0) {
-        throw std::string("failed load_bpf_prog " + config_.load_obj_name);
+        throw "failed load_bpf_prog " + config_.load_obj_name;
     }
+
+    ingress_prog_array_map_fd_ =
+        adapter_.get_map_fd_by_name("ingress_prog_map");
+    ingress_dump_fd_ = adapter_.get_prog_fd_by_name("xnat/dump/ingress");
+    ingress_nat_fd_  = adapter_.get_prog_fd_by_name("xnat/nat/ingress");
+
+    egress_prog_array_map_fd_ = adapter_.get_map_fd_by_name("egress_prog_map");
+    egress_dump_fd_ = adapter_.get_prog_fd_by_name("xnat/dump/egress");
+    egress_nat_fd_  = adapter_.get_prog_fd_by_name("xnat/nat/egress");
+
     return SUCCESS;
 }
 
@@ -261,8 +365,7 @@ xnat::attach_bpf_progs() {
     ingress_ifindex_ = adapter_.attach_bpf_prog(
         config_.ingress_progsec, config_.ingress_ifname, config_.xdp_flags);
     if (ingress_ifindex_ < 0) {
-        throw std::string("failed attach_bpf_prog to ingress " +
-                          config_.ingress_ifname);
+        throw "failed attach_bpf_prog to ingress " + config_.ingress_ifname;
     }
     info("Attach to interface %s:id(%d)",
          config_.ingress_ifname.c_str(),
@@ -271,8 +374,7 @@ xnat::attach_bpf_progs() {
     egress_ifindex_ = adapter_.attach_bpf_prog(
         config_.egress_progsec, config_.egress_ifname, config_.xdp_flags);
     if (egress_ifindex_ < 0) {
-        throw std::string("failed attach_bpf_prog to egress " +
-                          config_.egress_ifname);
+        throw "failed attach_bpf_prog to egress " + config_.egress_ifname;
     }
     info("Attach to interface %s:id(%d)",
          config_.egress_ifname.c_str(),
@@ -287,8 +389,8 @@ xnat::detach_bpf_progs() {
     err = adapter_.detach_bpf_prpg(
         -1, ingress_ifindex_, XDP_FLAGS_UPDATE_IF_NOEXIST | config_.xdp_flags);
     if (err < 0) {
-        throw std::string("failed detach_bpf_prpg to ingress (" +
-                          std::to_string(ingress_ifindex_) + ")");
+        throw "failed detach_bpf_prpg to ingress (" +
+            std::to_string(ingress_ifindex_) + ")";
     }
     info("Detach to interface %s:id(%d)",
          config_.ingress_ifname.c_str(),
@@ -297,8 +399,8 @@ xnat::detach_bpf_progs() {
     err = adapter_.detach_bpf_prpg(
         -1, egress_ifindex_, XDP_FLAGS_UPDATE_IF_NOEXIST | config_.xdp_flags);
     if (err < 0) {
-        throw std::string("failed detach_bpf_prpg to egress (" +
-                          std::to_string(egress_ifindex_) + ")");
+        throw "failed detach_bpf_prpg to egress (" +
+            std::to_string(egress_ifindex_) + ")";
     }
     info("Detach to interface %s:id(%d)",
          config_.egress_ifname.c_str(),
@@ -315,7 +417,7 @@ xnat::pin_maps() {
 
     err = adapter_.pin_maps(config_.map_pin_dir);
     if (err < 0) {
-        throw std::string("failed to pin maps - " + config_.map_pin_dir);
+        throw "failed to pin maps - " + config_.map_pin_dir;
     }
 
     return SUCCESS;
@@ -329,7 +431,7 @@ xnat::unpin_maps() {
 
     err = adapter_.unpin_maps(config_.load_obj_name, config_.map_pin_dir);
     if (err < 0) {
-        throw std::string("failed to pin maps - " + config_.map_pin_dir);
+        throw "failed to pin maps - " + config_.map_pin_dir;
     }
 
     return SUCCESS;
@@ -372,7 +474,7 @@ xnat::set_xnat_to_prog_array() {
 
     err = _update_prog_array(map_name, prog_name, index);
     if (err) {
-        throw std::string("failed update " + map_name);
+        throw "failed update " + map_name;
     }
 
     info(
@@ -383,7 +485,7 @@ xnat::set_xnat_to_prog_array() {
 
     err = _update_prog_array(map_name, prog_name, index);
     if (err) {
-        throw std::string("failed update " + map_name);
+        throw "failed update " + map_name;
     }
 
     info(
@@ -503,7 +605,7 @@ xnat::_event_poll() {
             err("epoll ERROR");
             ;
         } else if (err == 0) {
-            _print_nat_table();
+            // _print_nat_table();
             ;
         } else {
             // check event
@@ -633,15 +735,13 @@ xnat::_init_if_map() {
     err = _register_ifinfo(
         map_fd, config_.ingress_ifname.c_str(), ingress_ifindex_);
     if (err < 0) {
-        throw std::string("Failed register ingress ifinfo " +
-                          config_.ingress_ifname);
+        throw "Failed register ingress ifinfo " + config_.ingress_ifname;
     }
 
     err = _register_ifinfo(
         map_fd, config_.egress_ifname.c_str(), egress_ifindex_);
     if (err < 0) {
-        throw std::string("Failed register egress ifinfo " +
-                          config_.egress_ifname);
+        throw "Failed register egress ifinfo " + config_.egress_ifname;
     }
 
     return SUCCESS;
@@ -711,6 +811,15 @@ xnat::_init_freelist() {
     }
 
     return SUCCESS;
+}
+int
+_sys_perf_event_open(struct perf_event_attr *attr,
+                     pid_t pid,
+                     int cpu,
+                     int group_fd,
+                     uint32_t flags) {
+
+    return syscall(__NR_perf_event_open, attr, pid, cpu, group_fd, flags);
 }
 
 }; // namespace xnat

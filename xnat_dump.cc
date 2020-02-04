@@ -68,6 +68,12 @@ set_config(int argc, char *const argv[], struct config &cfg) {
 
 int
 main(int argc, char *const argv[]) {
+    struct rlimit lck_mem = {RLIM_INFINITY, RLIM_INFINITY};
+    if (setrlimit(RLIMIT_MEMLOCK, &lck_mem)) {
+        err("Can't change limit for locked memory");
+        return ERROR;
+    }
+
     struct config cfg;
 
     cfg.nr_cpus = bpf_num_possible_cpus();
@@ -81,7 +87,6 @@ main(int argc, char *const argv[]) {
         dump.set_config(cfg);
         dump.set_signal();
         dump.open_bpf_map_file(cfg.map_pin_dir, cfg.map_name);
-        dump.attach();
         dump.test_bpf_perf_event();
         dump.perf_event_mmap();
         dump.open_pcap();
@@ -93,7 +98,7 @@ main(int argc, char *const argv[]) {
         err("%s", e.c_str());
     }
 
-    dump.detach();
+    dump.disable_dump_mode();
 
     dump.print_result();
     return SUCCESS;
