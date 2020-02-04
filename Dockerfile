@@ -6,6 +6,14 @@ RUN apt update && apt upgrade -y \
         clang \
         libc6-dev-i386 \
         llvm \
+        libc++-dev \
+        libgrpc++-dev \
+        libgrpc-dev \
+        libprotobuf-dev \
+        libpcap-dev \
+        protobuf-compiler \
+        protobuf-compiler-grpc \
+        pkg-config \
         && apt -y install linux-source-5.4.0 \
         && cd /usr/src \
         && tar xjf linux-source-5.4.0.tar.bz2 \
@@ -23,3 +31,6 @@ RUN apt update && apt upgrade -y \
         && apt clean \
         && rm -rf /var/lib/apt/lists/*
 
+WORKDIR /xnat
+
+COPY . /xnat
