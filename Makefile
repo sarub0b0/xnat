@@ -16,7 +16,7 @@ PROTOC := protoc
 GRPC_CPP_PLUGIN :=grpc_cpp_plugin
 GRPC_CPP_PLUGIN_PATH ?= `which $(GRPC_CPP_PLUGIN)`
 
-all: xnat_kern xnat_stats xnat_dump xnat
+all: xnat_kern xnat_dump xnat
 
 xnat_kern:
 	$(CC) $(CFLAGS) $(DEBUGFLAG) -c xnat_kern.c -o -| $(LLC) $(LLFLAGS) -o xnat_kern.o
