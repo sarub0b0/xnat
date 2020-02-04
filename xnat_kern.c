@@ -10,17 +10,17 @@
 
 #include "bpf_helpers.h"
 #include "bpf_endian.h"
-#include "printk.h"
-#include "common.h"
 #include "define_kern.h"
+#include "printk.h"
+#include "checksum.h"
 #include "stats_kern.h"
 #include "parser.h"
 #include "ifinfo.h"
 #include "nat.h"
-// #include "eth.h"
-// #include "icmp.h"
-// #include "ipv4.h"
-// #include "fib.h"
+#include "ingress.h"
+#include "egress.h"
+
+#include "pcapdump.h"
 
 #define offsetof(TYPE, MEMBER) ((size_t) & ((TYPE *) 0)->MEMBER)
 
@@ -41,21 +41,6 @@
      offsetof(struct tcphdr, dest))
 #define IS_PSEUDO 0x10
 
-// #define PROG(F) SEC(#F) int bpf_func_##F
-
-// enum {
-//     ARP = 1,
-//     IP,
-//     IPV6,
-// };
-
-// struct bpf_map_def SEC("maps") prog_map = {
-//     .type        = BPF_MAP_TYPE_PROG_ARRAY,
-//     .key_size    = sizeof(__u32),
-//     .value_size  = sizeof(__u32),
-//     .max_entries = 8,
-// };
-//
 struct bpf_map_def SEC("maps") tx_map = {
     .type        = BPF_MAP_TYPE_DEVMAP,
     .key_size    = sizeof(__u32),
@@ -237,9 +222,6 @@ update_eth(struct ethhdr *eth,
 static __always_inline int
 update_ipv4_checksum(struct iphdr *old, struct iphdr *new) {
 
-    bpf_printk("old src ip(0x%x)\n", old->daddr);
-    bpf_printk("old dst ip(0x%x)\n", new->daddr);
-
     l3_csum_replace(&new->check, old->daddr, new->daddr, sizeof(new->daddr));
 
     return 0;
@@ -252,33 +234,6 @@ update_icmp_id(struct icmphdr *hdr, __be16 new_port) {
     return 0;
 }
 
-// static __always_inline int
-// update_icmp_checksum(struct icmphdr hdr, struct icmphdr *new_hdr) {
-
-//     __sum16 old_csum;
-
-//     old_csum = old_hdr->checksum;
-
-//     old_hdr->checksum = 0;
-//     new_hdr->checksum = 0;
-
-//     new_hdr->checksum =
-//         generic_checksum(new_hdr, old_hdr, sizeof(struct icmphdr), old_csum);
-
-//     return 0;
-// }
-
-// static __always_inline int
-// update_tcp_checksum(struct tcphdr *old, struct tcphdr *new) {
-//     __sum16 old_csum;
-//     old_csum = old->check;
-
-//     old->check = 0;
-//     new->check = 0;
-
-//     new->check = generic_checksum(new, old, sizeof(struct tcphdr), old_csum);
-//     return 0;
-// }
 static __always_inline __be16
 get_new_port(__be16 port_pool_key) {
     int err;
@@ -698,9 +653,11 @@ egress_update_l4(struct hdr_cursor *nh,
     return 0;
 }
 
-SEC("xnat/ingress")
+SEC("xnat/nat/ingress")
 int
-xnat_ingress(struct xdp_md *ctx) {
+xnat_nat_ingress(struct xdp_md *ctx) {
+
+    bpf_printk("SEC: xnat/nat/ingress\n");
     struct nat_info nat = {0};
 
     void *data     = (void *) (long) ctx->data;
@@ -718,6 +675,8 @@ xnat_ingress(struct xdp_md *ctx) {
     nh.pos              = data;
     ingress_ifindex     = ctx->ingress_ifindex;
     nat.ingress_ifindex = ingress_ifindex;
+
+    bpf_printk("INFO: ingress ifindex(%d)\n", ingress_ifindex);
 
     egress_ifindex = bpf_map_lookup_elem(&tx_map, &ingress_ifindex);
     if (!egress_ifindex) {
@@ -814,12 +773,13 @@ out:
     // return action;
 }
 
-SEC("xnat/egress")
+SEC("xnat/nat/egress")
 int
-xnat_egress(struct xdp_md *ctx) {
+xnat_nat_egress(struct xdp_md *ctx) {
+
     int action = XDP_PASS;
 
-    bpf_printk("xnat/egress\n");
+    bpf_printk("SEC: xnat/nat/egress\n");
 
     void *data     = (void *) (long) ctx->data;
     void *data_end = (void *) (long) ctx->data_end;
@@ -833,6 +793,7 @@ xnat_egress(struct xdp_md *ctx) {
 
     nh.pos         = data;
     egress_ifindex = ctx->ingress_ifindex;
+    bpf_printk("INFO: egress ifindex(%d)\n", egress_ifindex);
 
     // VLAN剥がす
     h_proto = parse_ethhdr(&nh, data_end, &eth);
@@ -872,7 +833,7 @@ xnat_egress(struct xdp_md *ctx) {
             goto err;
         }
 
-        bpf_printk("Look up nat-table (0x%x:%d)\n",
+        bpf_printk("INFO: Look up nat-table (0x%x:%d)\n",
                    bpf_ntohl(iph->daddr),
                    bpf_ntohs(l4_port));
 
@@ -935,19 +896,19 @@ out:
     return stats(ctx, &stats_map, action);
 }
 
-// PROG(ARP)(struct xdp_md *ctx) {
-//     bpf_printk("bpf_tail_call ARP\n");
-
-//     return XDP_PASS;
-// }
-
-// PROG(IP)(struct xdp_md *ctx) {
-//     bpf_printk("bpf_tail_call IP\n");
-//     return XDP_PASS;
-// }
-// PROG(IPV6)(struct xdp_md *ctx) {
-//     bpf_printk("bpf_tail_call IPV6\n");
-//     return XDP_PASS;
-// }
+SEC("xnat/root/ingress")
+int
+xnat_root_ingress(struct xdp_md *ctx) {
+    bpf_printk("SEC: xnat/root/ingress\n");
+    bpf_tail_call(ctx, &ingress_prog_map, 0);
+    return XDP_ABORTED;
+}
+SEC("xnat/root/egress")
+int
+xnat_root_egress(struct xdp_md *ctx) {
+    bpf_printk("SEC: xnat/root/egress\n");
+    bpf_tail_call(ctx, &egress_prog_map, 0);
+    return XDP_ABORTED;
+}
 
 char _license[] SEC("license") = "GPL";

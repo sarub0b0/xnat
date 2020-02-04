@@ -1,6 +1,6 @@
 
-#ifndef __COMMON_H
-#define __COMMON_H
+#ifndef __CHECKSUM_H
+#define __CHECKSUM_H
 
 #include <stdbool.h>
 
@@ -9,20 +9,6 @@
 
 #define CSUM_MANGLED_0 ((__sum16) 0xffff)
 #define IS_PSEUDO 0x10
-
-#define __force __attribute__((force))
-
-struct ether_arp {
-    __be16 ar_hrd;
-    __be16 ar_pro;
-    __u8 ar_hln;
-    __u8 ar_pln;
-    __be16 ar_op;
-    __u8 ar_sha[ETH_ALEN];
-    __u8 ar_sip[4];
-    __u8 ar_tha[ETH_ALEN];
-    __u8 ar_tip[4];
-};
 
 static __always_inline __wsum
 generic_checksum(void *new, void *old, int size, __wsum seed) {
@@ -125,12 +111,10 @@ csum_replace_by_diff(__sum16 *sum, __wsum diff) {
 static __always_inline void
 inet_proto_csum_replace4(__sum16 *sum, __be32 from, __be32 to, bool pseudohdr) {
     if (pseudohdr) {
-        bpf_printk("replace4 pseudo\n");
         *sum = ~csum_fold(
             csum_add(csum_sub(csum_unfold(*sum), (__wsum) from), (__wsum) to));
 
     } else {
-        bpf_printk("replace4 csum_fold\n");
         csum_replace4(sum, from, to);
     }
 }
@@ -154,7 +138,6 @@ static __always_inline int
 // flags) {
 l4_csum_replace(__sum16 *sum, __u64 old_value, __u64 new_value, __u64 flags) {
 
-    bpf_printk("old (0x%x) new(0x%x)\n", old_value, new_value);
 
     bool is_pseudo = flags & BPF_F_PSEUDO_HDR;
     bool is_mmzero = flags & BPF_F_MARK_MANGLED_0;
@@ -183,18 +166,15 @@ l4_csum_replace(__sum16 *sum, __u64 old_value, __u64 new_value, __u64 flags) {
             // ref. kernel code: net/core/filter.c
             // ref. kernel code: net/core/utils.c
             // inet_proto_csum_replace_by_diff(ptr, skb, to, is_pseudo);
-            bpf_printk("case 0\n");
             inet_proto_csum_replace_by_diff(sum, new_value, is_pseudo);
             break;
         case 2:
-            bpf_printk("case 2\n");
             // ref. kernel code: net/core/filter.c
             // ref. kernel code: net/core/utils.c
             // inet_proto_csum_replace2(ptr, skb, from, to, is_pseudo);
             inet_proto_csum_replace2(sum, old_value, new_value, is_pseudo);
             break;
         case 4:
-            bpf_printk("case 4\n");
             // ref. kernel code: net/core/filter.c
             // ref. kernel code: net/core/utils.c
             // inet_proto_csum_replace4(ptr, skb, from, to, is_pseudo);
@@ -219,15 +199,12 @@ l3_csum_replace(__sum16 *sum, __be32 old_value, __be32 new_value, __u32 flags) {
         case 0:
             // csum_replace_by_diff(sum, new_value);
             csum_replace_by_diff(sum, new_value);
-            bpf_printk("case 0\n");
             break;
         case 2:
             // *sum = ~csum16_add(csum16_add(~(*sum), ~old_value), new_value);
             csum_replace2(sum, old_value, new_value);
-            bpf_printk("case 2\n");
             break;
         case 4:
-            bpf_printk("case 4\n");
             // csum_replace_by_diff(sum, csum_add(new_value, ~old_value));
             csum_replace4(sum, old_value, new_value);
             break;

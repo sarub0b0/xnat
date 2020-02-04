@@ -1,32 +1,66 @@
 
 CC := clang
 LLC := llc
-# CFLAGS := -O2 -target bpf -Wall -DDEBUG
+# CFLAGS := -O2 -emit-llvm -Wall -DDEBUG
 CFLAGS := -O2 -emit-llvm -Wall
-DEBUGFLAG := -g
+DEBUGFLAG :=
 LLFLAGS := -march=bpf -filetype=obj
 # CFLAGS := -O2 -target bpf -Wall -DDEBUG
 
-all: xnat_kern xnat_user stats loader xnat_user
+CXX := clang++
+CPPFLAGS := -std=c++14
+OPTIMIZE := -O2
+# CPPFLAGS += `pkg-config --cflags protobuf grpc`
+
+PROTOC := protoc
+GRPC_CPP_PLUGIN :=grpc_cpp_plugin
+GRPC_CPP_PLUGIN_PATH ?= `which $(GRPC_CPP_PLUGIN)`
+
+all: xnat_kern xnat_stats xnat_dump xnat
 
 xnat_kern:
 	$(CC) $(CFLAGS) $(DEBUGFLAG) -c xnat_kern.c -o -| $(LLC) $(LLFLAGS) -o xnat_kern.o
 .PHONY: xnat_kern
 
-xnat_user:
-	$(CC) xnat_user.c -o xnat_user -lbpf
-.PHONY: xnat_user
+# xnat_stats:
+#     $(CXX) $(CPPFLAGS) xnat_stats.cc -o xnat_stats -lbpf
+# .PHONY: xnat_stats
 
-stats:
-	$(CC) stats.c -o stats -lbpf
-.PHONY: stats
+xnat: xnat.pb.o xnat.grpc.pb.o xnat.o
+	$(CXX) $(OPTIMIZE) $^ -L/usr/local/lib `pkg-config --libs protobuf grpc++` -lpthread -lbpf -o $@
+.PHONY: xnat
 
-loader:
-	$(CC) loader.c -o loader -lbpf
-.PHONY: loader
+xnat_dump: xnat.pb.o xnat.grpc.pb.o xnat_dump.o
+	$(CXX) $(OPTIMIZE) $^ -L/usr/local/lib `pkg-config --libs protobuf grpc++` -lpthread -lbpf -lpcap -o $@
+.PHONY: xnat_dump
+
+xnat.pb.o: xnat.pb.cc
+	clang++ $(OPTIMIZE) -std=c++14 `pkg-config --cflags protobuf grpc` -c -o xnat.pb.o xnat.pb.cc
+
+xnat.grpc.pb.o: xnat.grpc.pb.cc
+	clang++ $(OPTIMIZE) -std=c++14 `pkg-config --cflags protobuf grpc` -c -o xnat.grpc.pb.o xnat.grpc.pb.cc
+
+xnat.o:
+	clang++ $(CPPFLAGS) $(OPTIMIZE) `pkg-config --cflags protobuf grpc` -c -o xnat.o xnat.cc
+.PHONY: xnat.o
+
+xnat_dump.o:
+	clang++ $(CPPFLAGS) $(OPTIMIZE) `pkg-config --cflags protobuf grpc` -c -o xnat_dump.o xnat_dump.cc
+.PHONY: xnat_dump.o
+
+
+.PRECIOUS: %.grpc.pb.cc
+%.grpc.pb.cc: %.proto
+	$(PROTOC) --grpc_out=. --plugin=protoc-gen-grpc=$(GRPC_CPP_PLUGIN_PATH) $<
+
+.PRECIOUS: %.pb.cc
+%.pb.cc: %.proto
+	$(PROTOC) --cpp_out=.  $<
+
 
 clean:
-	-rm stats loader xnat_user *.o
+	-rm xnat_dump xnat_stats xnat *.o *.pb.cc *.pb.h
+
 
 init:
 	-ip link add ingress_xnat type veth peer name host0
