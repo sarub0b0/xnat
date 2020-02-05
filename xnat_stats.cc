@@ -2,9 +2,10 @@
 #include <cstdlib>
 #include <cstdint>
 #include <string>
-#include <cerrno>
+#include <cfloat>
 
 #include <time.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <net/if.h>
@@ -12,9 +13,9 @@
 #include <bpf/libbpf.h>
 #include <locale.h>
 
+#include "utils.h"
 #include "stats.h"
 #include "message.h"
-#include "utils.h"
 
 const std::string map_name    = "stats_map";
 const std::string dev_name    = "xnat";
@@ -90,7 +91,7 @@ gettime(void) {
         err("with clock_gettime! (%i)", res);
         exit(EXIT_FAIL);
     }
-    return (uint64_t) t.tv_sec * NANOSEC_PER_SEC + t.tv_nsec;
+    return static_cast<uint64_t>(t.tv_sec * NANOSEC_PER_SEC + t.tv_nsec);
 }
 
 static double
@@ -99,7 +100,7 @@ calc_period(struct record *r, struct record *p) {
     uint64_t period = 0;
     period          = r->timestamp - p->timestamp;
     if (period > 0) {
-        ret = ((double) period / NANOSEC_PER_SEC);
+        ret = static_cast<double>(period / NANOSEC_PER_SEC);
     }
     return ret;
 }
@@ -130,7 +131,7 @@ stats_print(struct stats_record *stats_rec, struct stats_record *stats_prev) {
         prev = &stats_prev->stats[i];
 
         period = calc_period(rec, prev);
-        if (period == 0) {
+        if (period < FLT_EPSILON) {
             return;
         }
 
@@ -170,7 +171,7 @@ map_get_value_percpu_array(int fd, uint32_t key, struct datarec *value) {
         fprintf(stderr, "ERR: bpf_map_lookup_elem failed\n");
         return;
     }
-    for (int i = 0; i < nr_cpus; i++) {
+    for (uint32_t i = 0; i < nr_cpus; i++) {
         sum_pkts += values[i].rx_packets;
         sum_bytes += values[i].rx_bytes;
     }
@@ -211,7 +212,7 @@ stats_collect(int map_fd, uint32_t map_type, struct stats_record *stats_rec) {
 static int
 stats_poll(const std::string *pin_dir,
            int map_fd,
-           int id,
+           uint32_t id,
            uint32_t map_type,
            int interval) {
 
@@ -245,7 +246,7 @@ int
 main(int argc, char const *argv[]) {
 
     std::string pin_dir;
-    struct bpf_map_info info = {0};
+    struct bpf_map_info info = {};
     int map_fd;
     int err;
 

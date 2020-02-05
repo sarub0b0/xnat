@@ -16,15 +16,15 @@ PROTOC := protoc
 GRPC_CPP_PLUGIN :=grpc_cpp_plugin
 GRPC_CPP_PLUGIN_PATH ?= `which $(GRPC_CPP_PLUGIN)`
 
-all: xnat_kern xnat_dump xnat
+all: xnat_kern xnat_dump xnat_stats xnat
 
 xnat_kern:
 	$(CC) $(CFLAGS) $(DEBUGFLAG) -c xnat_kern.c -o -| $(LLC) $(LLFLAGS) -o xnat_kern.o
 .PHONY: xnat_kern
 
-# xnat_stats:
-#     $(CXX) $(CPPFLAGS) xnat_stats.cc -o xnat_stats -lbpf
-# .PHONY: xnat_stats
+xnat_stats:
+	$(CXX) $(CPPFLAGS) $(OPTIMIZE) xnat_stats.cc -o xnat_stats -lbpf
+.PHONY: xnat_stats
 
 xnat: xnat.pb.o xnat.grpc.pb.o xnat.o
 	$(CXX) $(OPTIMIZE) $^ -L/usr/local/lib `pkg-config --libs protobuf grpc++` -lpthread -lbpf -o $@
