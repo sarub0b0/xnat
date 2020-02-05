@@ -23,7 +23,7 @@ xnat_kern:
 .PHONY: xnat_kern
 
 xnat_stats:
-	$(CXX) $(CPPFLAGS) $(OPTIMIZE) -stdlib=libc++ xnat_stats.cc -o xnat_stats -lbpf
+	$(CXX) $(CPPFLAGS) $(OPTIMIZE) xnat_stats.cc -o xnat_stats -lbpf
 .PHONY: xnat_stats
 
 xnat: xnat.pb.o xnat.grpc.pb.o xnat.o
