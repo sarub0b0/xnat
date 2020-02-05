@@ -43,3 +43,5 @@ RUN apt update && apt upgrade -y \
 WORKDIR /xnat
 
 COPY . /xnat
+
+CMD ["ls"]

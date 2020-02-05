@@ -5,44 +5,64 @@
 
 stages:
   - build
+  - package
   - test
+  - release
 
-# before_script:
-#   - echo "Before script section"
-#   - echo "For example you might run an update here or install a build dependency"
-#   - echo "Or perhaps you might print out some debugging details"
+
+before_script:
+  - echo "gitlab registry login"
+  - docker login -u ${CI_REGISTRY_USER} -p ${CI_REGISTRY_TOKEN} $CI_REGISTRY
 
 # after_script:
 #   - echo "After script section"
 #   - echo "For example you might do some cleanup here"
 
-cpp_build:
-  image: registry.gitlab.com/kosay/xnat:1.1
+
+variables:
+  APP_NAME: 'xnat'
+  CONTAINER_NAME: '${CI_PROJECT_NAME}_{APP_NAME}'
+  IMAGE_TAG: $CI_REGISTRY_IMAGE:$CI_COMMIT_REF_SLUG
+
+build_code:
+  image: registry.gitlab.com/kosay/xnat:1.2
   stage: build
   script:
     - make -j
   artifacts:
     paths:
-      - ./
+      - xnat
+      - xnat_dump
+      - xnat_stats
+      - xnat_kern.o
+      - Dockerfile
+      - code_analysis.sh
+      - test/
     expire_in: 1 day
+
+build_image:
+  stage: package
+  image: docker:19.03.1
+  services:
+    - docker:19.03.1-dind
+  script:
+    - docker build . -t $IMAGE_TAG
+    - docker push $IMAGE_TAG
 
 code_analysis:
   stage: test
+  image: $IMAGE_TAG
   script:
     - ./code_analysis.sh
 
 test:
   stage: test
+  image: $IMAGE_TAG
   script:
     - ./test/test.sh
 
-# test2:
-#   stage: test
-#   script:
-#     - echo "Do another parallel test here"
-#     - echo "For example run a lint test"
-
-# deploy1:
-#   stage: deploy
-#   script:
-#     - echo "Do your deploy here"
+release:
+  stage: release
+  image: $IMAGE_TAG
+  script:
+    - ls
