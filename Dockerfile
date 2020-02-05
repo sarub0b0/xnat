@@ -14,6 +14,8 @@ RUN apt update && apt upgrade -y \
         protobuf-compiler \
         protobuf-compiler-grpc \
         pkg-config \
+        cppcheck \
+        googletest \
         && apt -y install linux-source-5.4.0 \
         && cd /usr/src \
         && tar xjf linux-source-5.4.0.tar.bz2 \
