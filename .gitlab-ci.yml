@@ -10,9 +10,7 @@ stages:
   - release
 
 
-before_script:
-  - echo "gitlab registry login"
-  - docker login -u ${CI_REGISTRY_USER} -p ${CI_REGISTRY_TOKEN} $CI_REGISTRY
+# before_script:
 
 # after_script:
 #   - echo "After script section"
@@ -46,6 +44,8 @@ build_image:
   services:
     - docker:19.03.1-dind
   script:
+    - echo "gitlab registry login"
+    - docker login -u ${CI_REGISTRY_USER} -p ${CI_REGISTRY_TOKEN} $CI_REGISTRY
     - docker build . -t $IMAGE_TAG
     - docker push $IMAGE_TAG
 
