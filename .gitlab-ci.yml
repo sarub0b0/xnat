@@ -18,11 +18,15 @@ build:
   script:
     - make -j
 
-# test1:
+code_analysis:
+  stage: code_analysis
+  script:
+    - ./code_analysis.sh
+
+# test:
 #   stage: test
 #   script:
-#     - echo "Do a test here"
-#     - echo "For example run a test suite"
+#     - ./test/test.sh
 
 # test2:
 #   stage: test
