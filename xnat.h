@@ -49,9 +49,9 @@
 #define EV_MAX 16
 #define MAX_CPUS 128
 
-using namespace grpc;
 
 namespace xnat {
+using namespace grpc;
 
 class xnat final : public XnatService::Service {
 

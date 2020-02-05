@@ -23,10 +23,10 @@ code_analysis:
   script:
     - ./code_analysis.sh
 
-# test:
-#   stage: test
-#   script:
-#     - ./test/test.sh
+test:
+  stage: test
+  script:
+    - ./test/test.sh
 
 # test2:
 #   stage: test

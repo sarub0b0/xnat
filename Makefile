@@ -16,7 +16,9 @@ PROTOC := protoc
 GRPC_CPP_PLUGIN :=grpc_cpp_plugin
 GRPC_CPP_PLUGIN_PATH ?= `which $(GRPC_CPP_PLUGIN)`
 
-all: xnat_kern xnat_dump xnat_stats xnat
+all: build test_build
+
+build: xnat_kern xnat_dump xnat_stats xnat
 
 xnat_kern:
 	$(CC) $(CFLAGS) $(DEBUGFLAG) -c xnat_kern.c -o -| $(LLC) $(LLFLAGS) -o xnat_kern.o
@@ -47,6 +49,12 @@ xnat.o:
 xnat_dump.o:
 	clang++ $(CPPFLAGS) $(OPTIMIZE) `pkg-config --cflags protobuf grpc` -c -o xnat_dump.o xnat_dump.cc
 .PHONY: xnat_dump.o
+
+test_build: test_xnat_kern
+
+test_xnat_kern:
+	cd test; \
+		clang++ --std=c++14 test_xnat_kern.cc -o test_xnat_kern -lgtest -lgtest_main -lpthread
 
 
 .PRECIOUS: %.grpc.pb.cc
