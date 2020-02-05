@@ -59,7 +59,7 @@ SEC("xnat/dump/ingress") int xdp_ingress_dump(struct xdp_md *ctx) {
 
     dump(ctx);
 
-    bpf_tail_call(ctx, &ingress_prog_map, 1);
+    bpf_tail_call(ctx, &ingress_prog_array, 1);
 
     return XDP_ABORTED;
 }
@@ -70,7 +70,7 @@ SEC("xnat/dump/egress") int xdp_egress_dump(struct xdp_md *ctx) {
 
     dump(ctx);
 
-    bpf_tail_call(ctx, &egress_prog_map, 1);
+    bpf_tail_call(ctx, &egress_prog_array, 1);
 
     return XDP_ABORTED;
 }

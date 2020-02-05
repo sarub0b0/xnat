@@ -20,7 +20,7 @@
 #include "ingress.h"
 #include "egress.h"
 
-#include "pcapdump.h"
+#include "dump_kern.h"
 
 #define offsetof(TYPE, MEMBER) ((size_t) & ((TYPE *) 0)->MEMBER)
 
@@ -48,35 +48,28 @@ struct bpf_map_def SEC("maps") tx_map = {
     .max_entries = 50,
 };
 
-struct bpf_map_def SEC("maps") redirect_params = {
-    .type        = BPF_MAP_TYPE_HASH,
-    .key_size    = ETH_ALEN,
-    .value_size  = ETH_ALEN,
-    .max_entries = 50,
-};
-
-struct bpf_map_def SEC("maps") nat_map = {
+struct bpf_map_def SEC("maps") nat_table = {
     .type        = BPF_MAP_TYPE_HASH,
     .key_size    = sizeof(struct nm_k),
     .value_size  = sizeof(struct nat_info),
     .max_entries = 100,
 };
 
-struct bpf_map_def SEC("maps") if_map = {
+struct bpf_map_def SEC("maps") ifinfo_map = {
     .type        = BPF_MAP_TYPE_HASH,
     .key_size    = sizeof(__u32),
     .value_size  = sizeof(struct ifinfo),
     .max_entries = 256,
 };
 
-struct bpf_map_def SEC("maps") port_pool_map = {
+struct bpf_map_def SEC("maps") port_pool = {
     .type        = BPF_MAP_TYPE_HASH,
     .key_size    = sizeof(__be16),
     .value_size  = sizeof(__be16),
     .max_entries = 65536,
 };
 
-struct bpf_map_def SEC("maps") freelist_map = {
+struct bpf_map_def SEC("maps") free_list = {
     .type        = BPF_MAP_TYPE_STACK,
     .key_size    = 0,
     .value_size  = sizeof(__be16),
@@ -84,6 +77,7 @@ struct bpf_map_def SEC("maps") freelist_map = {
     .map_flags   = 0,
 };
 
+#ifdef DEBUG
 // bpf_printk用
 static __always_inline __u64
 ether_addr_to_u64(const __u8 *addr) {
@@ -96,7 +90,7 @@ ether_addr_to_u64(const __u8 *addr) {
 
     return u;
 }
-
+#endif
 static __always_inline void
 _print_iphdr(struct iphdr *h) {
     bpf_printk("\n");
@@ -240,19 +234,18 @@ get_new_port(__be16 port_pool_key) {
     __be16 *find_port;
     __be16 free_port = 0;
 
-    find_port = bpf_map_lookup_elem(&port_pool_map, &port_pool_key);
+    find_port = bpf_map_lookup_elem(&port_pool, &port_pool_key);
 
     if (!find_port) {
         bpf_printk("ERR: find port failed\n");
     } else {
         if (*find_port == 0) {
 
-            err = bpf_map_pop_elem(&freelist_map, &free_port);
+            err = bpf_map_pop_elem(&free_list, &free_port);
             if (err) {
                 bpf_printk("ERR: bpf_map_pop_elem failed\n");
             } else {
-                bpf_map_update_elem(
-                    &port_pool_map, &port_pool_key, &free_port, 0);
+                bpf_map_update_elem(&port_pool, &port_pool_key, &free_port, 0);
                 bpf_printk("INFO: Update port (%ld) -> (%ld)\n",
                            bpf_ntohs(port_pool_key),
                            bpf_ntohs(free_port));
@@ -421,7 +414,7 @@ update_ipv4(struct iphdr *iph, __u32 ifindex, struct nat_info *nat) {
     nat->saddr = iph->saddr;
     nat->daddr = iph->daddr;
 
-    info = bpf_map_lookup_elem(&if_map, &ifindex);
+    info = bpf_map_lookup_elem(&ifinfo_map, &ifindex);
     if (!info) {
         return -1;
     }
@@ -482,7 +475,7 @@ next_hop_lookup(struct xdp_md *ctx, struct bpf_fib_lookup *fib, __u32 flags) {
 
 static __always_inline int
 update_nat_map(struct nat_info *nat, struct nm_k *key) {
-    return bpf_map_update_elem(&nat_map, key, nat, BPF_NOEXIST);
+    return bpf_map_update_elem(&nat_table, key, nat, BPF_NOEXIST);
 }
 
 static __always_inline int
@@ -842,7 +835,7 @@ xnat_nat_egress(struct xdp_md *ctx) {
             .port = l4_port,
         };
 
-        nat_info = bpf_map_lookup_elem(&nat_map, &key);
+        nat_info = bpf_map_lookup_elem(&nat_table, &key);
         if (!nat_info) {
             bpf_printk(
                 "ERR: bpf_map_lookup_elem faild or Not found "
@@ -869,7 +862,7 @@ xnat_nat_egress(struct xdp_md *ctx) {
         bpf_printk("DEBUG: ingress_ifindex(%d)\n", *ingress_ifindex);
 
         struct ifinfo *info;
-        info = bpf_map_lookup_elem(&if_map, ingress_ifindex);
+        info = bpf_map_lookup_elem(&ifinfo_map, ingress_ifindex);
         if (!info) {
             goto err;
         }
@@ -900,14 +893,14 @@ SEC("xnat/root/ingress")
 int
 xnat_root_ingress(struct xdp_md *ctx) {
     bpf_printk("SEC: xnat/root/ingress\n");
-    bpf_tail_call(ctx, &ingress_prog_map, 0);
+    bpf_tail_call(ctx, &ingress_prog_array, 0);
     return XDP_ABORTED;
 }
 SEC("xnat/root/egress")
 int
 xnat_root_egress(struct xdp_md *ctx) {
     bpf_printk("SEC: xnat/root/egress\n");
-    bpf_tail_call(ctx, &egress_prog_map, 0);
+    bpf_tail_call(ctx, &egress_prog_array, 0);
     return XDP_ABORTED;
 }
 

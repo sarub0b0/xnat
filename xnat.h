@@ -114,11 +114,11 @@ class xnat final : public XnatService::Service {
     uint32_t egress_ifindex_;
     sigset_t sigset_;
 
-    int ingress_prog_array_map_fd_;
+    int ingress_prog_array_fd_;
     int ingress_dump_fd_;
     int ingress_nat_fd_;
 
-    int egress_prog_array_map_fd_;
+    int egress_prog_array_fd_;
     int egress_dump_fd_;
     int egress_nat_fd_;
 
@@ -194,25 +194,25 @@ xnat::_enable_dump_mode() {
 
     key = 1;
     if (adapter_.map_update_element(
-            ingress_prog_array_map_fd_, &key, &ingress_nat_fd_, BPF_ANY)) {
+            ingress_prog_array_fd_, &key, &ingress_nat_fd_, BPF_ANY)) {
         err("err 1");
         return ERROR;
     }
     if (adapter_.map_update_element(
-            egress_prog_array_map_fd_, &key, &egress_nat_fd_, BPF_ANY)) {
+            egress_prog_array_fd_, &key, &egress_nat_fd_, BPF_ANY)) {
         err("err 2");
         return ERROR;
     }
 
     key = 0;
     if (adapter_.map_update_element(
-            ingress_prog_array_map_fd_, &key, &ingress_dump_fd_, BPF_ANY)) {
+            ingress_prog_array_fd_, &key, &ingress_dump_fd_, BPF_ANY)) {
         err("err 3");
         return ERROR;
     }
 
     if (adapter_.map_update_element(
-            egress_prog_array_map_fd_, &key, &egress_dump_fd_, BPF_ANY)) {
+            egress_prog_array_fd_, &key, &egress_dump_fd_, BPF_ANY)) {
         err("err 4");
         return ERROR;
     }
@@ -229,24 +229,24 @@ xnat::_disable_dump_mode() {
     uint32_t key;
 
     key = 1;
-    if (adapter_.map_delete_element(ingress_prog_array_map_fd_, &key)) {
+    if (adapter_.map_delete_element(ingress_prog_array_fd_, &key)) {
         err("err 1");
         return ERROR;
     }
-    if (adapter_.map_delete_element(egress_prog_array_map_fd_, &key)) {
+    if (adapter_.map_delete_element(egress_prog_array_fd_, &key)) {
         err("err 2");
         return ERROR;
     }
 
     key = 0;
     if (adapter_.map_update_element(
-            ingress_prog_array_map_fd_, &key, &ingress_nat_fd_, BPF_ANY)) {
+            ingress_prog_array_fd_, &key, &ingress_nat_fd_, BPF_ANY)) {
         err("err 3");
         return ERROR;
     }
 
     if (adapter_.map_update_element(
-            egress_prog_array_map_fd_, &key, &egress_nat_fd_, BPF_ANY)) {
+            egress_prog_array_fd_, &key, &egress_nat_fd_, BPF_ANY)) {
         err("err 4");
         return ERROR;
     }
@@ -347,14 +347,13 @@ xnat::load_bpf_progs() {
         throw "failed load_bpf_prog " + config_.load_obj_name;
     }
 
-    ingress_prog_array_map_fd_ =
-        adapter_.get_map_fd_by_name("ingress_prog_map");
-    ingress_dump_fd_ = adapter_.get_prog_fd_by_name("xnat/dump/ingress");
-    ingress_nat_fd_  = adapter_.get_prog_fd_by_name("xnat/nat/ingress");
+    ingress_prog_array_fd_ = adapter_.get_map_fd_by_name("ingress_prog_array");
+    ingress_dump_fd_       = adapter_.get_prog_fd_by_name("xnat/dump/ingress");
+    ingress_nat_fd_        = adapter_.get_prog_fd_by_name("xnat/nat/ingress");
 
-    egress_prog_array_map_fd_ = adapter_.get_map_fd_by_name("egress_prog_map");
-    egress_dump_fd_ = adapter_.get_prog_fd_by_name("xnat/dump/egress");
-    egress_nat_fd_  = adapter_.get_prog_fd_by_name("xnat/nat/egress");
+    egress_prog_array_fd_ = adapter_.get_map_fd_by_name("egress_prog_array");
+    egress_dump_fd_       = adapter_.get_prog_fd_by_name("xnat/dump/egress");
+    egress_nat_fd_        = adapter_.get_prog_fd_by_name("xnat/nat/egress");
 
     return SUCCESS;
 }
@@ -469,7 +468,7 @@ xnat::set_xnat_to_prog_array() {
     int index;
 
     index     = 0;
-    map_name  = "ingress_prog_map";
+    map_name  = "ingress_prog_array";
     prog_name = "xnat/nat/ingress";
 
     err = _update_prog_array(map_name, prog_name, index);
@@ -480,7 +479,7 @@ xnat::set_xnat_to_prog_array() {
     info(
         "Update ingress prog array map index(%d):%s", index, prog_name.c_str());
 
-    map_name  = "egress_prog_map";
+    map_name  = "egress_prog_array";
     prog_name = "xnat/nat/egress";
 
     err = _update_prog_array(map_name, prog_name, index);
@@ -502,8 +501,8 @@ xnat::_print_nat_table() {
     struct nm_k nt_key      = {};
     struct nm_k nt_prev_key = {};
 
-    int port_pool_map_fd = adapter_.get_map_fd_by_name("port_pool_map");
-    int nat_map_fd       = adapter_.get_map_fd_by_name("nat_map");
+    int port_pool_map_fd = adapter_.get_map_fd_by_name("port_pool");
+    int nat_map_fd       = adapter_.get_map_fd_by_name("nat_table");
 
     info("");
     info("==== port pool ====");
@@ -730,7 +729,7 @@ xnat::_init_if_map() {
     int err;
     int map_fd;
 
-    map_fd = adapter_.get_map_fd_by_name("if_map");
+    map_fd = adapter_.get_map_fd_by_name("ifinfo_map");
 
     err = _register_ifinfo(
         map_fd, config_.ingress_ifname.c_str(), ingress_ifindex_);
@@ -779,7 +778,7 @@ int
 xnat::_init_port_pool() {
     int err;
 
-    int fd       = adapter_.get_map_fd_by_name("port_pool_map");
+    int fd       = adapter_.get_map_fd_by_name("port_pool");
     uint16_t v   = 0;
     uint16_t key = 0;
     for (uint16_t i = 0; i < 65535; i++) {
@@ -798,7 +797,7 @@ int
 xnat::_init_freelist() {
     int err;
 
-    int fd = adapter_.get_map_fd_by_name("freelist_map");
+    int fd = adapter_.get_map_fd_by_name("free_list");
 
     uint16_t key = 0;
     for (uint16_t i = 1024; i < 61024; i++) {
