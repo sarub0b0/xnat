@@ -16,6 +16,7 @@ RUN apt update && apt upgrade -y \
         pkg-config \
         cppcheck \
         googletest \
+        cmake \
         && apt -y install linux-source-5.4.0 \
         && cd /usr/src \
         && tar xjf linux-source-5.4.0.tar.bz2 \
@@ -30,9 +31,17 @@ RUN apt update && apt upgrade -y \
         && ln -sf /usr/local/lib64/libbpf.a /lib/libbpf.a \
         && ln -sf /usr/local/lib64/libbpf.so /lib/libbpf.so \
         && ln -s /usr/include/x86_64-linux-gnu/asm /usr/include/asm \
+        && cd /usr/src/googletest/ \
+        && mkdir build \
+        && cd build \
+        && cmake .. \
+        && make  \
+        && make install \
         && apt clean \
         && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /xnat
 
 COPY . /xnat
+
+CMD ["ls"]
