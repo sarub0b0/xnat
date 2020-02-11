@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-#include "gtest/gtest.h"
+#include <gtest/gtest.h>
 
 // #include "../xnat.h"
 namespace {

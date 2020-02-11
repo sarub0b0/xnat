@@ -124,7 +124,6 @@ main(int argc, char *const *argv) {
         xnat.init_maps();
 
         xnat.setup_grpc();
-        // xnat.run_grpc_server();
 
         xnat.event_loop();
 

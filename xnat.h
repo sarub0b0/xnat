@@ -8,6 +8,7 @@
 #include <vector>
 #include <unordered_map>
 
+#include <asm/types.h>
 #include <time.h>
 #include <fcntl.h>
 #include <unistd.h>
@@ -43,12 +44,14 @@
 
 #include "adapter.h"
 #include "config.h"
+#include "network_controll.h"
+
+#include "lpm_trie.h"
 
 #include "xnat.grpc.pb.h"
 
 #define EV_MAX 16
 #define MAX_CPUS 128
-
 
 namespace xnat {
 using namespace grpc;
@@ -56,10 +59,19 @@ using namespace grpc;
 class xnat final : public XnatService::Service {
 
    public:
-    xnat(const struct config &config) : config_(config) {
+    xnat(const struct config &config)
+        : net_ctrl_(config.ingress_ifname, config.egress_ifname),
+          config_(config) {
     }
     ~xnat() {
     }
+
+    Status GetIngressInfo(ServerContext *context,
+                          const Empty *request,
+                          Iface *response) override;
+    Status GetEgressInfo(ServerContext *context,
+                         const Empty *request,
+                         Iface *response) override;
 
     Status EnableDumpMode(ServerContext *context,
                           const Empty *request,
@@ -76,6 +88,20 @@ class xnat final : public XnatService::Service {
     Status DisableStatsMode(ServerContext *context,
                             const Empty *request,
                             Bool *response) override;
+
+    Status AddVip(ServerContext *context,
+                  const Vip *request,
+                  Bool *response) override;
+    Status DelVip(ServerContext *context,
+                  const Vip *request,
+                  Bool *response) override;
+
+    Status AddVlanIface(ServerContext *context,
+                        const Iface *request,
+                        Bool *response) override;
+    Status DelVlanIface(ServerContext *context,
+                        const Iface *request,
+                        Bool *response) override;
 
     int init();
     int load_bpf_progs();
@@ -101,12 +127,16 @@ class xnat final : public XnatService::Service {
     int _enable_dump_mode();
     int _disable_dump_mode();
 
-    int _init_if_map();
+    int _init_ifinfo_map();
     int _init_tx_map();
     int _init_port_pool();
     int _init_freelist();
+    int _init_vip_table();
+    int _init_lpm_trie();
 
     void _print_nat_table();
+
+    class network_controll net_ctrl_;
 
     class adapter adapter_;
     struct config config_;
@@ -131,6 +161,28 @@ class xnat final : public XnatService::Service {
 
 std::string xnat::listen_address_ = "0.0.0.0:0";
 ServerBuilder xnat::builder_;
+
+Status
+xnat::GetIngressInfo(ServerContext *context,
+                     const Empty *request,
+                     Iface *response) {
+
+    response->set_name(config_.ingress_ifname);
+    response->set_vid(0);
+
+    return Status::OK;
+}
+
+Status
+xnat::GetEgressInfo(ServerContext *context,
+                    const Empty *request,
+                    Iface *response) {
+
+    response->set_name(config_.egress_ifname);
+    response->set_vid(0);
+
+    return Status::OK;
+}
 
 Status
 xnat::EnableDumpMode(ServerContext *context,
@@ -178,6 +230,92 @@ xnat::DisableStatsMode(ServerContext *context,
 
     info("Call DisableStatsMode");
     response->set_success(true);
+    return Status::OK;
+}
+
+Status
+xnat::AddVip(ServerContext *context, const Vip *request, Bool *response) {
+
+    const Iface &iface = request->iface();
+    const Addr &addr   = request->addr();
+    const Type &type   = request->type();
+    int fd             = 0;
+
+    response->set_success(true);
+
+    if (net_ctrl_.add_vip(iface.name(), iface.vid(), addr.addr()) < 0) {
+        response->set_success(false);
+    }
+
+    if (type == INGRESS) {
+        info("update ingress vip table");
+        fd = adapter_.get_map_fd_by_name("ingress_vip_table");
+    } else if (type == EGRESS) {
+        info("update egress vip table");
+        fd = adapter_.get_map_fd_by_name("egress_vip_table");
+    }
+
+    __be32 ip;
+    __u32 vid;
+
+    vid = iface.vid();
+
+    int last = addr.addr().find_first_of("/");
+    std::string str_addr(addr.addr(), 0, last);
+
+    inet_pton(AF_INET, str_addr.c_str(), &ip);
+
+    ip = htonl(ip);
+
+    info("vid(%d) ip(0x%x)", vid, ip);
+
+    adapter_.map_update_element(fd, &vid, &ip, BPF_ANY);
+
+    return Status::OK;
+}
+
+Status
+xnat::DelVip(ServerContext *context, const Vip *request, Bool *response) {
+    return Status::OK;
+}
+
+Status
+xnat::AddVlanIface(ServerContext *context,
+                   const Iface *request,
+                   Bool *response) {
+    return Status::OK;
+}
+Status
+xnat::DelVlanIface(ServerContext *context,
+                   const Iface *request,
+                   Bool *response) {
+
+    response->set_success(true);
+
+    if (net_ctrl_.del_vlan_iface(request->name()) < 0) {
+        response->set_success(false);
+    }
+
+    int fd    = 0;
+    __be32 ip = 0;
+    __u32 vid = 0;
+
+    if (request->type() == INGRESS) {
+        fd = adapter_.get_map_fd_by_name("ingress_vip_table");
+    } else if (request->type() == EGRESS) {
+        fd = adapter_.get_map_fd_by_name("egress_vip_table");
+    }
+
+    vid = request->vid();
+
+    if (adapter_.map_update_element(fd, &vid, &ip, BPF_ANY)) {
+        err("failed delete %s vip_table vid(%d)",
+            Type_Name(request->type()).c_str(),
+            vid);
+    }
+    info(
+        "Delete %s vip_table vid(%d)", Type_Name(request->type()).c_str(), vid);
+
     return Status::OK;
 }
 
@@ -497,7 +635,7 @@ void
 xnat::_print_nat_table() {
     int err;
     uint16_t port;
-    struct nat_info nt      = {};
+    struct nat_record nt    = {};
     struct nm_k nt_key      = {};
     struct nm_k nt_prev_key = {};
 
@@ -614,7 +752,7 @@ xnat::_event_poll() {
                     err = read(sig_fd, &s_buf, sizeof(s_buf));
 
                     info("");
-                    info("Received SIGINT");
+                    info("Received signal");
 
                     pthread_kill(pt, SIGINT);
 
@@ -651,17 +789,23 @@ xnat::event_loop() {
 int
 xnat::init_maps() {
     info("Initialize maps");
-    info(" - Initialize if_map");
-    if (_init_if_map() < 0) return ERROR;
+    info(" - Initialize ifinfo_map");
+    if (_init_ifinfo_map() < 0) throw "failed initialize ifinfo_map";
 
     info(" - Initialize tx_map");
-    if (_init_tx_map() < 0) return ERROR;
+    if (_init_tx_map() < 0) throw "failed initialize tx_map";
 
-    info(" - Initialize port_pool_map");
-    if (_init_port_pool() < 0) return ERROR;
+    info(" - Initialize port_pool");
+    if (_init_port_pool() < 0) throw "failed initialize port_pool";
 
-    info(" - Initialize freelist_map");
-    if (_init_freelist() < 0) return ERROR;
+    info(" - Initialize free_list");
+    if (_init_freelist() < 0) throw "failed initialize free_list";
+
+    info(" - Initialize vip_table");
+    if (_init_vip_table() < 0) throw "failed initialize vip_table";
+
+    info(" - Initialize lpm_trie");
+    if (_init_lpm_trie() < 0) throw "failed initialize lpm_trie";
 
     return SUCCESS;
 }
@@ -684,6 +828,7 @@ xnat::_register_ifinfo(int fd, const char *ifname, uint32_t ifindex) {
 
     err = ioctl(sock, SIOCGIFHWADDR, &ifr);
     if (err < 0) {
+        err("failed read hw addr");
         close(sock);
         return ERROR;
     }
@@ -691,16 +836,16 @@ xnat::_register_ifinfo(int fd, const char *ifname, uint32_t ifindex) {
     memcpy(info.mac, ifr.ifr_hwaddr.sa_data, ETH_ALEN);
 
     err = ioctl(sock, SIOCGIFADDR, &ifr);
-    if (err < 0) {
+    if (err == 0) {
+        memcpy(&saddr, &ifr.ifr_addr, sizeof(saddr));
+        memcpy(&info.ip, &saddr.sin_addr, 4);
+
+    } else {
+        err("failed read ip addr");
         close(sock);
-        return ERROR;
     }
-
-    memcpy(&saddr, &ifr.ifr_addr, sizeof(saddr));
-
-    memcpy(&info.ip, &saddr.sin_addr, 4);
     info(
-        "   - ifindex(%d) addr(0x%x/%u.%u.%u.%u) "
+        "   - ifindex(%d) addr(0x%08x/%u.%u.%u.%u) "
         "mac(%02x:%02x:%02x:%02x:%02x:%02x)",
         ifindex,
         ntohl(info.ip),
@@ -721,11 +866,13 @@ xnat::_register_ifinfo(int fd, const char *ifname, uint32_t ifindex) {
         return ERROR;
     }
 
+    close(sock);
+
     return SUCCESS;
 }
 
 int
-xnat::_init_if_map() {
+xnat::_init_ifinfo_map() {
     int err;
     int map_fd;
 
@@ -794,6 +941,47 @@ xnat::_init_port_pool() {
 }
 
 int
+xnat::_init_vip_table() {
+    int err;
+    int fd;
+    __be32 ip;
+    __u32 vid;
+
+    fd = adapter_.get_map_fd_by_name("ifinfo_map");
+
+    struct ifinfo ingress_info, egress_info;
+
+    if (adapter_.map_lookup_element(fd, &ingress_ifindex_, &ingress_info)) {
+        err("failed lookup ingress ifinfo");
+        return ERROR;
+    }
+    if (adapter_.map_lookup_element(fd, &egress_ifindex_, &egress_info)) {
+        err("failed lookup egress ifinfo");
+        return ERROR;
+    }
+
+    fd  = adapter_.get_map_fd_by_name("ingress_vip_table");
+    ip  = htonl(ingress_info.ip);
+    vid = 0;
+    err = adapter_.map_update_element(fd, &vid, &ip, BPF_ANY);
+    if (err) {
+        err("failed update vip_table");
+        return ERROR;
+    }
+
+    fd = adapter_.get_map_fd_by_name("egress_vip_table");
+    ip = htonl(egress_info.ip);
+
+    err = adapter_.map_update_element(fd, &vid, &ip, BPF_ANY);
+    if (err) {
+        err("failed update vip_table");
+        return ERROR;
+    }
+
+    return SUCCESS;
+}
+
+int
 xnat::_init_freelist() {
     int err;
 
@@ -811,6 +999,97 @@ xnat::_init_freelist() {
 
     return SUCCESS;
 }
+
+int
+xnat::_init_lpm_trie() {
+
+    int err;
+    int fd = adapter_.get_map_fd_by_name("lpm_trie");
+
+    // TEST
+    struct lpm_trie_key route_vid_0 = {
+        .data      = {192, 168, 0, 0},
+        .prefixlen = 24,
+    };
+    struct lpm_trie_key route_vid_100 = {
+        .data      = {10, 10, 0, 0},
+        .prefixlen = 24,
+    };
+
+    struct lpm_trie_key route_vid_200 = {
+        .data      = {10, 20, 0, 0},
+        .prefixlen = 24,
+    };
+    struct lpm_trie_key route_default = {
+        .data      = {0, 0, 0, 0},
+        .prefixlen = 0,
+    };
+    // struct lpm_trie_key route_vid_100 = {
+    //     .data      = {10, 10, 0, 0},
+    //     .prefixlen = 24,
+    // };
+
+    struct lpm_trie_value value;
+
+    value.ifindex = ingress_ifindex_;
+    value.vid     = 0;
+
+    err = adapter_.map_update_element(fd, &route_vid_0, &value, BPF_ANY);
+    if (err) {
+        err("update vid 0");
+        return ERROR;
+    }
+
+    value.vid = 100;
+    err = adapter_.map_update_element(fd, &route_vid_100, &value, BPF_ANY);
+    if (err) {
+        err("update vid 100");
+        return ERROR;
+    }
+
+    value.vid = 200;
+    err = adapter_.map_update_element(fd, &route_vid_200, &value, BPF_ANY);
+    if (err) {
+        err("update vid 200");
+        return ERROR;
+    }
+
+    struct lpm_trie_key route_vid_300 = {
+        .data      = {10, 30, 0, 0},
+        .prefixlen = 24,
+    };
+    struct lpm_trie_key route_vid_400 = {
+        .data      = {10, 40, 0, 0},
+        .prefixlen = 24,
+    };
+
+    value.ifindex = egress_ifindex_;
+    value.vid     = 0;
+
+    value.vid = 300;
+    err = adapter_.map_update_element(fd, &route_vid_300, &value, BPF_ANY);
+    if (err) {
+        err("update vid 300");
+        return ERROR;
+    }
+
+    value.vid = 400;
+    err = adapter_.map_update_element(fd, &route_vid_400, &value, BPF_ANY);
+    if (err) {
+        err("update vid 400");
+        return ERROR;
+    }
+
+    value.vid = 0;
+    err = adapter_.map_update_element(fd, &route_default, &value, BPF_ANY);
+    if (err) {
+        err("update default");
+        return ERROR;
+    }
+
+    return SUCCESS;
+}
+
 int
 _sys_perf_event_open(struct perf_event_attr *attr,
                      pid_t pid,

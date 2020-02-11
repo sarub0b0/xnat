@@ -1,15 +1,16 @@
 
 CC := clang
 LLC := llc
-# CFLAGS := -O2 -emit-llvm -Wall -DDEBUG
-CFLAGS := -O2 -emit-llvm -Wall
+CFLAGS := -O2 -emit-llvm -Wall -DDEBUG -Wno-unused-function -Wno-unused-label
+
+# CFLAGS := -O2 -emit-llvm -Wall
 DEBUGFLAG :=
 LLFLAGS := -march=bpf -filetype=obj
 # CFLAGS := -O2 -target bpf -Wall -DDEBUG
 
 CXX := clang++
-CPPFLAGS := -std=c++14
-OPTIMIZE := -O2
+CPPFLAGS := -std=c++14 -g
+OPTIMIZE := -O0
 # CPPFLAGS += `pkg-config --cflags protobuf grpc`
 
 PROTOC := protoc
@@ -18,7 +19,7 @@ GRPC_CPP_PLUGIN_PATH ?= `which $(GRPC_CPP_PLUGIN)`
 
 all: build test_build
 
-build: xnat_kern xnat_dump xnat_stats xnat
+build: xnat_kern xnat_dump xnat_stats xnat controller
 
 xnat_kern:
 	$(CC) $(CFLAGS) $(DEBUGFLAG) -c xnat_kern.c -o -| $(LLC) $(LLFLAGS) -o xnat_kern.o
@@ -29,26 +30,38 @@ xnat_stats:
 .PHONY: xnat_stats
 
 xnat: xnat.pb.o xnat.grpc.pb.o xnat.o
-	$(CXX) $(OPTIMIZE) $^ -L/usr/local/lib `pkg-config --libs protobuf grpc++` -lpthread -lbpf -o $@
+	$(CXX) $(OPTIMIZE) $^ -L/usr/local/lib `pkg-config --libs protobuf grpc++ libnl-3.0 libnl-route-3.0` -lpthread -lbpf `pkg-config --libs libnl-3.0 libnl-route-3.0` -o $@
 .PHONY: xnat
 
 xnat_dump: xnat.pb.o xnat.grpc.pb.o xnat_dump.o
 	$(CXX) $(OPTIMIZE) $^ -L/usr/local/lib `pkg-config --libs protobuf grpc++` -lpthread -lbpf -lpcap -o $@
 .PHONY: xnat_dump
 
+controller: xnat.pb.o xnat.grpc.pb.o controller.o
+	$(CXX) $(OPTIMIZE) $^ -L/usr/local/lib `pkg-config --libs protobuf grpc++` -lpthread -o $@
+.PHONY: controller
+
+
 xnat.pb.o: xnat.pb.cc
 	clang++ $(OPTIMIZE) -std=c++14 `pkg-config --cflags protobuf grpc` -c -o xnat.pb.o xnat.pb.cc
+.PHONY: xnat.pb.o
 
 xnat.grpc.pb.o: xnat.grpc.pb.cc
 	clang++ $(OPTIMIZE) -std=c++14 `pkg-config --cflags protobuf grpc` -c -o xnat.grpc.pb.o xnat.grpc.pb.cc
+.PHONY: xnat.grpc.pb.o
 
 xnat.o:
-	clang++ $(CPPFLAGS) $(OPTIMIZE) `pkg-config --cflags protobuf grpc` -c -o xnat.o xnat.cc
+	clang++ $(CPPFLAGS) $(OPTIMIZE) `pkg-config --cflags protobuf grpc libnl-3.0 libnl-route-3.0` -c -o xnat.o xnat.cc
 .PHONY: xnat.o
 
 xnat_dump.o:
-	clang++ $(CPPFLAGS) $(OPTIMIZE) `pkg-config --cflags protobuf grpc` -c -o xnat_dump.o xnat_dump.cc
+	clang++ $(cppflags) $(optimize) `pkg-config --cflags protobuf grpc` -c -o xnat_dump.o xnat_dump.cc
 .PHONY: xnat_dump.o
+
+controller.o:
+	clang++ $(cppflags) $(optimize) `pkg-config --cflags protobuf grpc` -c -o controller.o controller.cc
+.PHONY: controller.o
+
 
 test_build: test_xnat_kern
 

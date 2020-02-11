@@ -56,9 +56,14 @@ xnat_kern
 xnat_stats
 xnat_dump
 xnat
+controller
+
+*.pcap
 
 *.pb.cc
 *.pb.h
+
+test/test_xnat_kern
 
 GPATH
 GRTAGS

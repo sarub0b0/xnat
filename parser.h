@@ -30,14 +30,29 @@ struct vlan_hdr {
     __be16 h_vlan_encapsulated_proto;
 };
 
-static __always_inline int proto_is_vlan(__u16 h_proto) {
+struct arp_hdr {
+    __be16 hrd;
+    __be16 pro;
+    __u8 hln;
+    __u8 pln;
+    __be16 op;
+    __u8 sha[ETH_ALEN];
+    __be32 sip;
+    __u8 tha[ETH_ALEN];
+    __be32 tip;
+} __attribute__((packed));
+
+static __always_inline int
+proto_is_vlan(__u16 h_proto) {
     return !!(h_proto == bpf_htons(ETH_P_8021Q) ||
               h_proto == bpf_htons(ETH_P_8021AD));
 }
 
-static __always_inline __be16 parse_ethhdr(struct hdr_cursor *nh,
-                                           void *data_end,
-                                           struct ethhdr **ethhdr) {
+static __always_inline __be16
+parse_ethhdr(struct hdr_cursor *nh,
+             void *data_end,
+             struct ethhdr **ethhdr,
+             __u16 *vid) {
 
     struct ethhdr *h = (struct ethhdr *) nh->pos;
     struct vlan_hdr *vlh;
@@ -57,6 +72,7 @@ static __always_inline __be16 parse_ethhdr(struct hdr_cursor *nh,
         if (vlh + 1 > (struct vlan_hdr *) data_end) break;
 
         h_proto = vlh->h_vlan_encapsulated_proto;
+        *vid    = bpf_htons(vlh->h_vlan_TCI) & 0x0fff;
         vlh++;
     }
 
@@ -64,9 +80,8 @@ static __always_inline __be16 parse_ethhdr(struct hdr_cursor *nh,
     return h_proto;
 }
 
-static __always_inline int parse_ip6hdr(struct hdr_cursor *nh,
-                                        void *data_end,
-                                        struct ipv6hdr **ip6hdr) {
+static __always_inline int
+parse_ip6hdr(struct hdr_cursor *nh, void *data_end, struct ipv6hdr **ip6hdr) {
 
     struct ipv6hdr *h = (struct ipv6hdr *) nh->pos;
 
@@ -77,9 +92,8 @@ static __always_inline int parse_ip6hdr(struct hdr_cursor *nh,
     return h->nexthdr;
 }
 
-static __always_inline int parse_iphdr(struct hdr_cursor *nh,
-                                       void *data_end,
-                                       struct iphdr **iphdr) {
+static __always_inline int
+parse_iphdr(struct hdr_cursor *nh, void *data_end, struct iphdr **iphdr) {
     struct iphdr *h = (struct iphdr *) nh->pos;
     int hdrsize;
 
@@ -95,9 +109,8 @@ static __always_inline int parse_iphdr(struct hdr_cursor *nh,
     return h->protocol;
 }
 
-static __always_inline int parse_icmphdr(struct hdr_cursor *nh,
-                                         void *data_end,
-                                         struct icmphdr **icmphdr) {
+static __always_inline int
+parse_icmphdr(struct hdr_cursor *nh, void *data_end, struct icmphdr **icmphdr) {
 
     struct icmphdr *h = (struct icmphdr *) nh->pos;
 
@@ -108,8 +121,10 @@ static __always_inline int parse_icmphdr(struct hdr_cursor *nh,
 
     return h->type;
 }
-static __always_inline int parse_icmphdr_common(
-    struct hdr_cursor *nh, void *data_end, struct icmphdr_common **icmphdr) {
+static __always_inline int
+parse_icmphdr_common(struct hdr_cursor *nh,
+                     void *data_end,
+                     struct icmphdr_common **icmphdr) {
 
     struct icmphdr_common *h = (struct icmphdr_common *) nh->pos;
 

@@ -3,6 +3,11 @@ syntax = "proto3";
 
 message Empty{}
 
+enum Type {
+    INGRESS = 0;
+    EGRESS = 1;
+}
+
 message Mode {
     string mode = 1;
 }
@@ -11,12 +16,39 @@ message Bool {
     bool success = 1;
 }
 
-service XnatService {
-    rpc EnableDumpMode (Empty) returns (Bool);
+message Addr {
+    string addr = 1;
+    // uint32 ip = 1;
+    // uint32 prefixlen = 2;
+}
 
+message Iface {
+    string name = 1;
+    uint32 vid = 2;
+    Type type = 3;
+}
+
+message Vip {
+    Iface iface = 1;
+    Addr addr = 2;
+    Type type = 3;
+}
+
+
+
+service XnatService {
+    rpc GetIngressInfo (Empty) returns(Iface);
+    rpc GetEgressInfo (Empty) returns(Iface);
+
+    rpc EnableDumpMode (Empty) returns (Bool);
     rpc DisableDumpMode (Empty) returns (Bool);
 
     rpc EnableStatsMode (Empty) returns (Bool);
-
     rpc DisableStatsMode (Empty) returns (Bool);
+
+    rpc AddVip (Vip) returns (Bool);
+    rpc DelVip (Vip) returns (Bool);
+
+    rpc AddVlanIface (Iface) returns (Bool);
+    rpc DelVlanIface (Iface) returns (Bool);
 }
