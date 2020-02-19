@@ -1,5 +1,5 @@
 #!/bin/bash
 
-cppcheck xnat_dump.cc
-cppcheck xnat_stats.cc
-cppcheck xnat.cc
+cppcheck src/xnat_dump.cc
+cppcheck src/xnat_stats.cc
+cppcheck src/xnat.cc
