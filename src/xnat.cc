@@ -131,9 +131,13 @@ main(int argc, char *const *argv) {
         err("%s", e.c_str());
     }
 
-    if (config.rm_flag) {
-        xnat.unpin_maps();
-        xnat.detach_bpf_progs();
+    try {
+        if (config.rm_flag) {
+            xnat.unpin_maps();
+            xnat.detach_bpf_progs();
+        }
+    } catch (std::string &e) {
+        err("%s", e.c_str());
     }
     return SUCCESS;
 }

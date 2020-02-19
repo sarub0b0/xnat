@@ -52,19 +52,17 @@ Mkfile.old
 dkms.conf
 
 
-xnat_kern
-xnat_stats
-xnat_dump
-xnat
-controller
 
 *.pcap
 
-*.pb.cc
-*.pb.h
-
+src/*.pb.cc
+src/*.pb.h
+src/*.o
+bin/*
 test/test_xnat_kern
 
 GPATH
 GRTAGS
 GTAGS
+
+!bin/.gitkeep

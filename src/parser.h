@@ -71,8 +71,10 @@ parse_ethhdr(struct hdr_cursor *nh,
 
         if (vlh + 1 > (struct vlan_hdr *) data_end) break;
 
+        bpf_printk("vlan_TCI(0x%x)\n", vlh->h_vlan_TCI);
+
         h_proto = vlh->h_vlan_encapsulated_proto;
-        *vid    = bpf_htons(vlh->h_vlan_TCI) & 0x0fff;
+        // *vid    = bpf_htons(vlh->h_vlan_TCI) & 0x0fff;
         vlh++;
     }
 

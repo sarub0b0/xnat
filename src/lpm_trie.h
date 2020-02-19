@@ -11,4 +11,6 @@ struct lpm_trie_value {
     __u16 vid;
 };
 
+// destination address -> egress vid & vip
+
 #endif /* end of include guard */

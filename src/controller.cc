@@ -37,8 +37,8 @@ usage_route() {
 void
 usage_vlan() {
     printf("  Commands:\n");
-    printf("    vlan add dev IFNAME vid VLAN_ID vip IPADDR\n");
-    printf("    vlan del dev IFNAME [ vip IPADDR ]\n");
+    printf("    vlan add {ingress|egress} dev IFNAME vid VLAN_ID vip IPADDR\n");
+    printf("    vlan del {ingress|egress} dev IFNAME [ vip IPADDR ]\n");
 }
 
 void
@@ -53,6 +53,11 @@ do_vlan(const std::vector<std::string> &argv, class controller &ctrl) {
         usage_vlan();
         return ERROR;
     }
+
+    for (auto &&c : argv) {
+        printf("%s ", c.c_str());
+    }
+    printf("\n");
 
     printf("vlan\n");
 

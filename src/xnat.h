@@ -482,7 +482,7 @@ xnat::load_bpf_progs() {
     int err;
     err = adapter_.load_bpf_prog(config_.load_obj_name, config_.prog_load_attr);
     if (err < 0) {
-        throw "failed load_bpf_prog " + config_.load_obj_name;
+        throw std::string("failed load_bpf_prog " + config_.load_obj_name);
     }
 
     ingress_prog_array_fd_ = adapter_.get_map_fd_by_name("ingress_prog_array");
@@ -501,8 +501,9 @@ xnat::attach_bpf_progs() {
 
     ingress_ifindex_ = adapter_.attach_bpf_prog(
         config_.ingress_progsec, config_.ingress_ifname, config_.xdp_flags);
-    if (ingress_ifindex_ < 0) {
-        throw "failed attach_bpf_prog to ingress " + config_.ingress_ifname;
+    if (static_cast<int32_t>(ingress_ifindex_) < 0) {
+        throw std::string("failed attach_bpf_prog to ingress " +
+                          config_.ingress_ifname);
     }
     info("Attach to interface %s:id(%d)",
          config_.ingress_ifname.c_str(),
@@ -510,8 +511,9 @@ xnat::attach_bpf_progs() {
 
     egress_ifindex_ = adapter_.attach_bpf_prog(
         config_.egress_progsec, config_.egress_ifname, config_.xdp_flags);
-    if (egress_ifindex_ < 0) {
-        throw "failed attach_bpf_prog to egress " + config_.egress_ifname;
+    if (static_cast<int32_t>(egress_ifindex_) < 0) {
+        throw std::string("failed attach_bpf_prog to egress " +
+                          config_.egress_ifname);
     }
     info("Attach to interface %s:id(%d)",
          config_.egress_ifname.c_str(),
@@ -526,8 +528,7 @@ xnat::detach_bpf_progs() {
     err = adapter_.detach_bpf_prpg(
         -1, ingress_ifindex_, XDP_FLAGS_UPDATE_IF_NOEXIST | config_.xdp_flags);
     if (err < 0) {
-        throw "failed detach_bpf_prpg to ingress (" +
-            std::to_string(ingress_ifindex_) + ")";
+        throw std::string("failed detach_bpf_prpg to ingress (" + std::to_string(ingress_ifindex_) + ")");
     }
     info("Detach to interface %s:id(%d)",
          config_.ingress_ifname.c_str(),
@@ -536,8 +537,8 @@ xnat::detach_bpf_progs() {
     err = adapter_.detach_bpf_prpg(
         -1, egress_ifindex_, XDP_FLAGS_UPDATE_IF_NOEXIST | config_.xdp_flags);
     if (err < 0) {
-        throw "failed detach_bpf_prpg to egress (" +
-            std::to_string(egress_ifindex_) + ")";
+        throw std::string("failed detach_bpf_prpg to egress (" +
+                          std::to_string(egress_ifindex_) + ")");
     }
     info("Detach to interface %s:id(%d)",
          config_.egress_ifname.c_str(),
@@ -554,7 +555,7 @@ xnat::pin_maps() {
 
     err = adapter_.pin_maps(config_.map_pin_dir);
     if (err < 0) {
-        throw "failed to pin maps - " + config_.map_pin_dir;
+        throw std::string("failed to pin maps - " + config_.map_pin_dir);
     }
 
     return SUCCESS;
@@ -568,7 +569,7 @@ xnat::unpin_maps() {
 
     err = adapter_.unpin_maps(config_.load_obj_name, config_.map_pin_dir);
     if (err < 0) {
-        throw "failed to pin maps - " + config_.map_pin_dir;
+        throw std::string("failed to pin maps - " + config_.map_pin_dir);
     }
 
     return SUCCESS;
@@ -611,7 +612,7 @@ xnat::set_xnat_to_prog_array() {
 
     err = _update_prog_array(map_name, prog_name, index);
     if (err) {
-        throw "failed update " + map_name;
+        throw std::string("failed update " + map_name);
     }
 
     info(
@@ -622,7 +623,7 @@ xnat::set_xnat_to_prog_array() {
 
     err = _update_prog_array(map_name, prog_name, index);
     if (err) {
-        throw "failed update " + map_name;
+        throw std::string("failed update " + map_name);
     }
 
     info(
@@ -778,7 +779,7 @@ xnat::event_loop() {
 
     err = _event_poll();
     if (err < 0) {
-        throw "Event ERROR";
+        throw std::string("Event ERROR");
     }
 
     info("Event loop finished");
@@ -790,22 +791,23 @@ int
 xnat::init_maps() {
     info("Initialize maps");
     info(" - Initialize ifinfo_map");
-    if (_init_ifinfo_map() < 0) throw "failed initialize ifinfo_map";
+    if (_init_ifinfo_map() < 0)
+        throw std::string("failed initialize ifinfo_map");
 
     info(" - Initialize tx_map");
-    if (_init_tx_map() < 0) throw "failed initialize tx_map";
+    if (_init_tx_map() < 0) throw std::string("failed initialize tx_map");
 
     info(" - Initialize port_pool");
-    if (_init_port_pool() < 0) throw "failed initialize port_pool";
+    if (_init_port_pool() < 0) throw std::string("failed initialize port_pool");
 
     info(" - Initialize free_list");
-    if (_init_freelist() < 0) throw "failed initialize free_list";
+    if (_init_freelist() < 0) throw std::string("failed initialize free_list");
 
     info(" - Initialize vip_table");
-    if (_init_vip_table() < 0) throw "failed initialize vip_table";
+    if (_init_vip_table() < 0) throw std::string("failed initialize vip_table");
 
     info(" - Initialize lpm_trie");
-    if (_init_lpm_trie() < 0) throw "failed initialize lpm_trie";
+    if (_init_lpm_trie() < 0) throw std::string("failed initialize lpm_trie");
 
     return SUCCESS;
 }
@@ -881,13 +883,15 @@ xnat::_init_ifinfo_map() {
     err = _register_ifinfo(
         map_fd, config_.ingress_ifname.c_str(), ingress_ifindex_);
     if (err < 0) {
-        throw "Failed register ingress ifinfo " + config_.ingress_ifname;
+        throw std::string("Failed register ingress ifinfo " +
+                          config_.ingress_ifname);
     }
 
     err = _register_ifinfo(
         map_fd, config_.egress_ifname.c_str(), egress_ifindex_);
     if (err < 0) {
-        throw "Failed register egress ifinfo " + config_.egress_ifname;
+        throw std::string("Failed register egress ifinfo " +
+                          config_.egress_ifname);
     }
 
     return SUCCESS;
@@ -903,13 +907,13 @@ xnat::_init_tx_map() {
     err = adapter_.map_update_element(
         map_fd, &ingress_ifindex_, &egress_ifindex_, BPF_ANY);
     if (err < 0) {
-        throw "Failed update tx_map";
+        throw std::string("Failed update tx_map");
     }
 
     err = adapter_.map_update_element(
         map_fd, &egress_ifindex_, &ingress_ifindex_, BPF_ANY);
     if (err < 0) {
-        throw "Failed update tx_map";
+        throw std::string("Failed update tx_map");
     }
 
     info("   - redirect from if(%s:%d) -> if(%s:%d)",
