@@ -52,17 +52,14 @@ Mkfile.old
 dkms.conf
 
 
+bin/
+build/
 
 *.pcap
 
-src/*.pb.cc
-src/*.pb.h
-src/*.o
-bin/*
 test/test_xnat_kern
 
 GPATH
 GRTAGS
 GTAGS
 
-!bin/.gitkeep

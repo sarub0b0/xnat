@@ -1,24 +1,34 @@
-SRCDIR := src
+BPFDIR := bpf
 TESTDIR := test
 
-all:
-	cd $(shell pwd)/$(SRCDIR); make
-	cd $(shell pwd)/$(TESTDIR); make
+all: utils bpf test
 
-main:
-	cd $(shell pwd)/$(SRCDIR); make
+$(shell mkdir -p bin)
+
+bpf:
+	$(MAKE) -C $(BPFDIR)
+.PHONY: bpf
+
+utils:
+	mkdir -p build
+	cd build; cmake .. && make -j --no-print-directory && make install --no-print-directory
+.PHONY: utils
 
 test:
-	cd $(shell pwd)/$(TESTDIR); make
+	$(MAKE) -C $(TESTDIR)
+.PHONY: test
 
-clean: main_clean test_clean
-	-rm -rf bin/*
+clean: bpf_clean test_clean utils_clean
+	-rm -rf bin
 
-main_clean:
-	cd $(shell pwd)/$(SRCDIR); make clean
+utils_clean:
+	-rm -rf build
+
+bpf_clean:
+	$(MAKE) -C $(BPFDIR) clean
 
 test_clean:
-	cd $(shell pwd)/$(TESTDIR); make clean
+	$(MAKE) -C $(TESTDIR) clean
 
 env:
 	ip link add link ens192 name ens192.100 type vlan id 100

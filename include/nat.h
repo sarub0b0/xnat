@@ -3,8 +3,6 @@
 
 #include <linux/if_ether.h>
 
-#include "bpf_endian.h"
-
 struct nm_k {
     __be32 addr;
     __be16 port;
