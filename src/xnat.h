@@ -803,11 +803,11 @@ xnat::init_maps() {
     info(" - Initialize free_list");
     if (_init_freelist() < 0) throw std::string("failed initialize free_list");
 
-    info(" - Initialize vip_table");
-    if (_init_vip_table() < 0) throw std::string("failed initialize vip_table");
+    // info(" - Initialize vip_table");
+    // if (_init_vip_table() < 0) throw std::string("failed initialize vip_table");
 
-    info(" - Initialize lpm_trie");
-    if (_init_lpm_trie() < 0) throw std::string("failed initialize lpm_trie");
+    // info(" - Initialize lpm_trie");
+    // if (_init_lpm_trie() < 0) throw std::string("failed initialize lpm_trie");
 
     return SUCCESS;
 }

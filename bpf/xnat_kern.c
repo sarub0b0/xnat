@@ -63,72 +63,73 @@
 //     return 0;
 // }
 
-struct port_pool {
-    __u16 port[MAX_PORT_LEN];
-    __u16 pos;
-};
+// struct port_pool {
+//     __u16 port[MAX_PORT_LEN];
+//     __u16 pos;
+// };
 
-struct ip_pool {
-    __u32 ip_start; // vip
-    __u32 ip_end;
-};
+// struct ip_pool {
+//     __u32 ip_start; // vip
+//     __u32 ip_end;
+// };
 
-struct pool {
-    struct ip_pool ip_pool;
-    struct port_pool port_pool;
-};
+// struct pool {
+//     struct ip_pool ip_pool;
+//     struct port_pool port_pool;
+// };
 
-struct vip {
-    __u16 vid;
-    struct ip_pool pool;
-};
+// struct vip {
+//     __u16 vid;
+//     struct ip_pool pool;
+// };
 
-struct port_pool_key {
-    __u32 ip;
-    __u16 vid;
-} __attribute__((packed));
+// struct port_pool_key {
+//     __u32 ip;
+//     __u16 vid;
+// } __attribute__((packed));
 
-struct bpf_map_def SEC("maps") ingress_arp_table = {
-    .type        = BPF_MAP_TYPE_HASH,
-    .key_size    = sizeof(6),
-    .value_size  = sizeof(6),
-    .max_entries = 10,
-};
+// struct bpf_map_def SEC("maps") ingress_arp_table = {
+//     .type        = BPF_MAP_TYPE_HASH,
+//     .key_size    = sizeof(6),
+//     .value_size  = sizeof(6),
+//     .max_entries = 10,
+// };
 
-struct bpf_map_def SEC("maps") ingress_pool = {
-    .type        = BPF_MAP_TYPE_HASH,
-    .key_size    = sizeof(struct port_pool_key),
-    .value_size  = sizeof(struct port_pool),
-    .max_entries = MAX_VLAN_LEN * MAX_IPPOOL_LEN,
-};
-struct bpf_map_def SEC("maps") egress_pool = {
-    .type        = BPF_MAP_TYPE_HASH,
-    .key_size    = sizeof(struct port_pool_key),
-    .value_size  = sizeof(struct port_pool),
-    .max_entries = MAX_VLAN_LEN * MAX_IPPOOL_LEN,
-};
+// struct bpf_map_def SEC("maps") ingress_pool = {
+//     .type        = BPF_MAP_TYPE_HASH,
+//     .key_size    = sizeof(struct port_pool_key),
+//     .value_size  = sizeof(struct port_pool),
+//     .max_entries = MAX_VLAN_LEN * MAX_IPPOOL_LEN,
+// };
 
-struct bpf_map_def SEC("maps") lpm_trie = {
-    .type        = BPF_MAP_TYPE_LPM_TRIE,
-    .key_size    = sizeof(struct lpm_trie_key),
-    .value_size  = sizeof(struct lpm_trie_value),
-    .max_entries = 128,
-    .map_flags   = BPF_F_NO_PREALLOC,
-};
+// struct bpf_map_def SEC("maps") egress_pool = {
+//     .type        = BPF_MAP_TYPE_HASH,
+//     .key_size    = sizeof(struct port_pool_key),
+//     .value_size  = sizeof(struct port_pool),
+//     .max_entries = MAX_VLAN_LEN * MAX_IPPOOL_LEN,
+// };
 
-struct bpf_map_def SEC("maps") ingress_vip_table = {
-    .type        = BPF_MAP_TYPE_ARRAY,
-    .key_size    = sizeof(__u32),
-    .value_size  = sizeof(__be32),
-    .max_entries = 4096,
-};
+// struct bpf_map_def SEC("maps") lpm_trie = {
+//     .type        = BPF_MAP_TYPE_LPM_TRIE,
+//     .key_size    = sizeof(struct lpm_trie_key),
+//     .value_size  = sizeof(struct lpm_trie_value),
+//     .max_entries = 128,
+//     .map_flags   = BPF_F_NO_PREALLOC,
+// };
 
-struct bpf_map_def SEC("maps") egress_vip_table = {
-    .type        = BPF_MAP_TYPE_ARRAY,
-    .key_size    = sizeof(__u32),
-    .value_size  = sizeof(__be32),
-    .max_entries = 4096,
-};
+// struct bpf_map_def SEC("maps") ingress_vip_table = {
+//     .type        = BPF_MAP_TYPE_ARRAY,
+//     .key_size    = sizeof(__u32),
+//     .value_size  = sizeof(__be32),
+//     .max_entries = 4096,
+// };
+
+// struct bpf_map_def SEC("maps") egress_vip_table = {
+//     .type        = BPF_MAP_TYPE_ARRAY,
+//     .key_size    = sizeof(__u32),
+//     .value_size  = sizeof(__be32),
+//     .max_entries = 4096,
+// };
 
 struct bpf_map_def SEC("maps") tx_map = {
     .type        = BPF_MAP_TYPE_DEVMAP,
@@ -252,82 +253,82 @@ set_fib(struct iphdr *iph, struct bpf_fib_lookup *fib) {
     fib->ipv4_dst    = iph->daddr;
 }
 
-static __always_inline int
-check_vlan(__u32 vid) {
-    __be32 *ip;
+// static __always_inline int
+// check_vlan(__u32 vid) {
+//     __be32 *ip;
 
-    ip = bpf_map_lookup_elem(&ingress_vip_table, &vid);
-    if (!ip) {
-        bpf_printk("ERR: Can't lookup ip from vid_table\n");
-        return -1;
-    }
+//     ip = bpf_map_lookup_elem(&ingress_vip_table, &vid);
+//     if (!ip) {
+//         bpf_printk("ERR: Can't lookup ip from vid_table\n");
+//         return -1;
+//     }
 
-    if (*ip == bpf_htonl(0x0000)) {
-        bpf_printk("INFO: Don't register vlan id\n");
-        return -1;
-    }
+//     if (*ip == bpf_htonl(0x0000)) {
+//         bpf_printk("INFO: Don't register vlan id\n");
+//         return -1;
+//     }
 
-    return 0;
-}
+//     return 0;
+// }
 
-static __always_inline int
-update_arphdr(struct hdr_cursor *nh, void *data_end, struct ifinfo *ifinfo) {
-    struct arp_hdr *hdr = (struct arp_hdr *) nh->pos;
+// static __always_inline int
+// update_arphdr(struct hdr_cursor *nh, void *data_end, struct ifinfo *ifinfo) {
+//     struct arp_hdr *hdr = (struct arp_hdr *) nh->pos;
 
-    if (hdr + 1 > (struct arp_hdr *) data_end) {
-        bpf_printk("ERR: Can't read memory address\n");
-        return -1;
-    }
+//     if (hdr + 1 > (struct arp_hdr *) data_end) {
+//         bpf_printk("ERR: Can't read memory address\n");
+//         return -1;
+//     }
 
-    if (hdr->op != bpf_htons(1) && hdr->tip == ifinfo->ip) {
-        bpf_printk("ERR: Don't match op-code or target ip\n");
-        return -1;
-    }
+//     if (hdr->op != bpf_htons(1) && hdr->tip == ifinfo->ip) {
+//         bpf_printk("ERR: Don't match op-code or target ip\n");
+//         return -1;
+//     }
 
-    hdr->op = bpf_htons(2);
+//     hdr->op = bpf_htons(2);
 
-    bpf_printk("DEBUG: info ip(0x%x)\n", ifinfo->ip);
-    bpf_printk("DEBUG: sender ip(0x%x)\n", hdr->sip);
+//     bpf_printk("DEBUG: info ip(0x%x)\n", ifinfo->ip);
+//     bpf_printk("DEBUG: sender ip(0x%x)\n", hdr->sip);
 
-    __be32 temp_ip = hdr->sip;
-    __u8 temp_mac[ETH_ALEN];
+//     __be32 temp_ip = hdr->sip;
+//     __u8 temp_mac[ETH_ALEN];
 
-    memcpy(temp_mac, hdr->sha, ETH_ALEN);
+//     memcpy(temp_mac, hdr->sha, ETH_ALEN);
 
-    hdr->sip = ifinfo->ip;
-    memcpy(hdr->sha, ifinfo->mac, ETH_ALEN);
+//     hdr->sip = ifinfo->ip;
+//     memcpy(hdr->sha, ifinfo->mac, ETH_ALEN);
 
-    hdr->tip = temp_ip;
+//     hdr->tip = temp_ip;
 
-    memcpy(hdr->tha, temp_mac, ETH_ALEN);
+//     memcpy(hdr->tha, temp_mac, ETH_ALEN);
 
-    return 0;
-}
+//     return 0;
+// }
 
-static __always_inline int
-lookup_next_hop(struct iphdr *iphdr, struct lpm_trie_value *output) {
-    struct lpm_trie_key key = {
-        .data      = {0, 0, 0, 0},
-        .prefixlen = 32,
-    };
+// static __always_inline int
+// lookup_next_hop(struct iphdr *iphdr, struct lpm_trie_value *output) {
+//     struct lpm_trie_key key = {
+//         .data      = {0, 0, 0, 0},
+//         .prefixlen = 32,
+//     };
 
-    key.data[0] = (iphdr->daddr >> 24) & 0x000f;
-    key.data[1] = (iphdr->daddr >> 16) & 0x000f;
-    key.data[2] = (iphdr->daddr >> 8) & 0x000f;
-    key.data[3] = (iphdr->daddr) & 0x000f;
+//     key.data[0] = (iphdr->daddr >> 24) & 0x000f;
+//     key.data[1] = (iphdr->daddr >> 16) & 0x000f;
+//     key.data[2] = (iphdr->daddr >> 8) & 0x000f;
+//     key.data[3] = (iphdr->daddr) & 0x000f;
 
-    struct lpm_trie_value *ret;
+//     struct lpm_trie_value *ret;
 
-    ret = bpf_map_lookup_elem(&lpm_trie, &key);
-    if (!ret) {
-        bpf_printk("ERR: failed lookup lpm_trie\n");
-        return -1;
-    }
+//     ret = bpf_map_lookup_elem(&lpm_trie, &key);
+//     if (!ret) {
+//         bpf_printk("ERR: failed lookup lpm_trie\n");
+//         return -1;
+//     }
 
-    *output = *ret;
+//     *output = *ret;
 
-    return 0;
-}
+//     return 0;
+// }
 
 static __always_inline int
 update_ipv4_checksum(struct iphdr *old, struct iphdr *new) {
