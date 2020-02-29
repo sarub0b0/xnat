@@ -65,5 +65,5 @@ release:
   stage: release
   image: $BASE_IMAGE
   script:
-    - ls bin
+    - ls -R
     - bin/xnat --help
