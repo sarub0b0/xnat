@@ -6,7 +6,7 @@
 stages:
   - build
   - test
-  - package
+  # - package
   - release
 
 
@@ -26,6 +26,9 @@ build_code:
   stage: build
   script:
     - make -j
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    - docker build . --cache-from $BASE_IMAGE -t $RELEASE_IMAGE
+    - docker push $RELEASE_IMAGE
   artifacts:
     name: $CI_JOB_NAME-$CI_COMMIT_REF_NAME
     paths:
@@ -35,26 +38,26 @@ build_code:
       - Dockerfile
     expire_in: 1 day
 
-build_image:
-  stage: package
-  image: docker:19.03.1
-  services:
-    - docker:19.03.1-dind
-  script:
-    - echo "gitlab registry login"
-    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-    - docker build . --cache-from $BASE_IMAGE -t $RELEASE_IMAGE
-    - docker push $RELEASE_IMAGE
+# build_image:
+#   stage: package
+#   image: docker:19.03.1
+#   services:
+#     - docker:19.03.1-dind
+#   script:
+#     - echo "gitlab registry login"
+#     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+#     - docker build . --cache-from $BASE_IMAGE -t $RELEASE_IMAGE
+#     - docker push $RELEASE_IMAGE
 
 code_analysis:
   stage: test
-  image: $BASE_IMAGE
+  image: $RELEASE_IMAGE
   script:
     - ./script/code_analysis.sh
 
 test:
   stage: test
-  image: $BASE_IMAGE
+  image: $RELEASE_IMAGE
   script:
     - ./test/test.sh
 
