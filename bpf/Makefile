@@ -3,7 +3,8 @@ BINDIR := ../bin
 CC := clang
 LLC := llc
 
-CFLAGS := -O2 -emit-llvm -Wall -DDEBUG -Wno-unused-function -Wno-unused-label
+# CFLAGS := -O2 -emit-llvm -Wall -DDEBUG -Wno-unused-function -Wno-unused-label
+CFLAGS := -O2 -emit-llvm -Wall -Wno-unused-function -Wno-unused-label
 # CFLAGS := -O2 -emit-llvm -Wall -Wno-unused-function -Wno-unused-label
 #
 INC := -I../include

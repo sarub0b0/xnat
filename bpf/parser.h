@@ -9,6 +9,7 @@
 #include <linux/tcp.h>
 #include <linux/udp.h>
 
+#include "bpf_helpers.h"
 #include "bpf_endian.h"
 
 #ifndef VLAN_MAX_DEPTH
@@ -30,17 +31,17 @@ struct vlan_hdr {
     __be16 h_vlan_encapsulated_proto;
 };
 
-struct arp_hdr {
-    __be16 hrd;
-    __be16 pro;
-    __u8 hln;
-    __u8 pln;
-    __be16 op;
-    __u8 sha[ETH_ALEN];
-    __be32 sip;
-    __u8 tha[ETH_ALEN];
-    __be32 tip;
-} __attribute__((packed));
+// struct arp_hdr {
+//     __be16 hrd;
+//     __be16 pro;
+//     __u8 hln;
+//     __u8 pln;
+//     __be16 op;
+//     __u8 sha[ETH_ALEN];
+//     __be32 sip;
+//     __u8 tha[ETH_ALEN];
+//     __be32 tip;
+// } __attribute__((packed));
 
 static __always_inline int
 proto_is_vlan(__u16 h_proto) {
@@ -65,11 +66,21 @@ parse_ethhdr(struct hdr_cursor *nh,
     vlh     = (struct vlan_hdr *) nh->pos;
     h_proto = h->h_proto;
 
-#pragma unroll
-    for (int i = 0; i < VLAN_MAX_DEPTH; i++) {
-        if (!proto_is_vlan(h_proto)) break;
+    // #pragma unroll
+    //     for (int i = 0; i < VLAN_MAX_DEPTH; i++) {
+    //         if (!proto_is_vlan(h_proto)) break;
 
-        if (vlh + 1 > (struct vlan_hdr *) data_end) break;
+    //         if (vlh + 1 > (struct vlan_hdr *) data_end) break;
+
+    //         bpf_printk("vlan_TCI(0x%x)\n", vlh->h_vlan_TCI);
+
+    //         h_proto = vlh->h_vlan_encapsulated_proto;
+    //         // *vid    = bpf_htons(vlh->h_vlan_TCI) & 0x0fff;
+    //         vlh++;
+    //     }
+
+    if (proto_is_vlan(h_proto)) {
+        if (vlh + 1 > (struct vlan_hdr *) data_end) return -1;
 
         bpf_printk("vlan_TCI(0x%x)\n", vlh->h_vlan_TCI);
 
