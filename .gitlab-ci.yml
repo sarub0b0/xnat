@@ -26,9 +26,9 @@ build_code:
   stage: build
   script:
     - make -j
-    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-    - docker build . --cache-from $BASE_IMAGE -t $RELEASE_IMAGE
-    - docker push $RELEASE_IMAGE
+    # - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+    # - docker build . --cache-from $BASE_IMAGE -t $RELEASE_IMAGE
+    # - docker push $RELEASE_IMAGE
   artifacts:
     name: $CI_JOB_NAME-$CI_COMMIT_REF_NAME
     paths:
@@ -51,18 +51,19 @@ build_code:
 
 code_analysis:
   stage: test
-  image: $RELEASE_IMAGE
+  image: $BASE_IMAGE
   script:
     - ./script/code_analysis.sh
 
 test:
   stage: test
-  image: $RELEASE_IMAGE
+  image: $BASE_IMAGE
   script:
     - ./test/test.sh
 
 release:
   stage: release
-  image: $RELEASE_IMAGE
+  image: $BASE_IMAGE
   script:
     - ls/bin
+    - bin/xnat --help
