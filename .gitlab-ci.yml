@@ -19,7 +19,7 @@ stages:
 
 variables:
   RELEASE_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
-  BASE_IMAGE: registry.gitlab.com/kosay/xnat:1.2
+  BASE_IMAGE: registry.gitlab.com/kosay/xnat/app:1.0
 
 build_code:
   image: $BASE_IMAGE
