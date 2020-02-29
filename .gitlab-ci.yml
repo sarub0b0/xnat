@@ -19,16 +19,13 @@ stages:
 
 variables:
   RELEASE_IMAGE: $CI_REGISTRY_IMAGE:$CI_COMMIT_SHA
-  BASE_IMAGE: registry.gitlab.com/kosay/xnat/app:1.0
+  BASE_IMAGE: registry.gitlab.com/kosay/xnat/core:1.0
 
 build_code:
   image: $BASE_IMAGE
   stage: build
   script:
     - make -j
-    # - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-    # - docker build . --cache-from $BASE_IMAGE -t $RELEASE_IMAGE
-    # - docker push $RELEASE_IMAGE
   artifacts:
     name: $CI_JOB_NAME-$CI_COMMIT_REF_NAME
     paths:
