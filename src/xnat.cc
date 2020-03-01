@@ -64,7 +64,7 @@ set_config(int argc, char *const *argv, struct config &cfg) {
                 break;
             case 'h':
                 usage();
-                return SUCCESS;
+                exit(0);
             case 1:
                 cfg.xdp_flags &= ~XDP_FLAGS_MODES;
                 cfg.xdp_flags |= XDP_FLAGS_DRV_MODE;
