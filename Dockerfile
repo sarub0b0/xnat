@@ -4,5 +4,4 @@ WORKDIR /xnat
 
 COPY . /xnat
 
-RUN make -j
 
