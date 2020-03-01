@@ -1,26 +1,39 @@
+BPFDIR := bpf
+TESTDIR := test
 
-CC := clang
-# CFLAGS := -O2 -target bpf -Wall -DDEBUG
-# CFLAGS := -O2 -target bpf -Wall
-CFLAGS := -O2 -target bpf -Wall -DDEBUG
+all: utils bpf test
 
-all: xnat_kern xnat_user stats loader xnat_user
+$(shell mkdir -p bin)
 
-xnat_kern:
-	$(CC) $(CFLAGS) -c xnat_kern.c -o xnat_kern.o
-.PHONY: xnat_kern
+bpf:
+	$(MAKE) -C $(BPFDIR)
+.PHONY: bpf
 
-xnat_user:
-	$(CC) xnat_user.c -o xnat_user -lbpf
-.PHONY: xnat_user
+utils:
+	mkdir -p build
+	cd build; cmake .. && make -j --no-print-directory && make install --no-print-directory
+.PHONY: utils
 
-stats:
-	$(CC) stats.c -o stats -lbpf
-.PHONY: stats
+test:
+	$(MAKE) -C $(TESTDIR)
+.PHONY: test
 
-loader:
-	$(CC) loader.c -o loader -lbpf
-.PHONY: loader
+clean: bpf_clean test_clean utils_clean
+	-rm -rf bin
 
-clean:
-	-rm stats loader xnat_user *.o
+utils_clean:
+	-rm -rf build
+
+bpf_clean:
+	$(MAKE) -C $(BPFDIR) clean
+
+test_clean:
+	$(MAKE) -C $(TESTDIR) clean
+
+env:
+	ip link add link ens192 name ens192.100 type vlan id 100
+	ip link add link ens224 name ens224.300 type vlan id 300
+	ip addr add 10.10.0.1/24 dev ens192.100
+	ip addr add 10.30.0.1/24 dev ens224.300
+	ip link set ens192.100 up
+	ip link set ens224.300 up

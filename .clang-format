@@ -1,0 +1,19 @@
+BasedOnStyle: google
+IndentWidth: 4
+
+
+AlignConsecutiveAssignments: true
+AlignTrailingComments: true
+AllowShortBlocksOnASingleLine: false
+AllowShortFunctionsOnASingleLine: None
+AlwaysBreakAfterReturnType: AllDefinitions
+BinPackArguments: false
+BinPackParameters: false
+ColumnLimit: 78
+DerivePointerAlignment: false
+IndentCaseLabels: true
+KeepEmptyLinesAtTheStartOfBlocks: true
+PointerAlignment: Right
+SortIncludes: false
+SpaceAfterCStyleCast: true
+SpacesBeforeTrailingComments: 1

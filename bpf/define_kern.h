@@ -13,4 +13,8 @@
 #define memset(dst, value, len) __builtin_memset((dst), (value), (len))
 #endif
 
+#ifndef __force
+#define __force __attribute__((force))
+#endif
+
 #endif /* end of include guard */

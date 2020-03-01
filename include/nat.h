@@ -3,14 +3,12 @@
 
 #include <linux/if_ether.h>
 
-#include "bpf_endian.h"
-
 struct nm_k {
     __be32 addr;
     __be16 port;
 } __attribute__((packed));
 
-struct nat_info {
+struct nat_record {
     __u16 ingress_ifindex;
     __u16 egress_ifindex;
     __u8 seth[ETH_ALEN];
@@ -19,7 +17,7 @@ struct nat_info {
     __be32 daddr;
     __be16 sport;
     __be16 dport;
-    __be16 proto;
+    __u8 proto;
     __be32 new_addr;
     __be16 new_port;
     // };
