@@ -2,11 +2,11 @@
 #define __MESSAGE_H
 
 #include <stdio.h>
-#define err(fmt...)                                               \
-    do {                                                          \
+#define err(fmt...)                                                \
+    do {                                                           \
         fprintf(stderr, "ERR: %s, line %d: ", __FILE__, __LINE__); \
-        fprintf(stderr, fmt);                                     \
-        fprintf(stderr, "\n");                                    \
+        fprintf(stderr, fmt);                                      \
+        fprintf(stderr, "\n");                                     \
     } while (0)
 
 #define warn(fmt...)               \

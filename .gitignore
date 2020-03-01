@@ -52,14 +52,14 @@ Mkfile.old
 dkms.conf
 
 
-xnat_kern
-xnat_stats
-xnat_dump
-xnat
+bin/
+build/
 
-*.pb.cc
-*.pb.h
+*.pcap
+
+test/test_xnat_kern
 
 GPATH
 GRTAGS
 GTAGS
+

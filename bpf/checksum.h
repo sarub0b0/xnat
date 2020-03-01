@@ -4,6 +4,10 @@
 
 #include <stdbool.h>
 
+#include "bpf_helpers.h"
+
+#include "printk.h"
+
 #include "parser.h"
 #include "nat.h"
 
@@ -11,11 +15,11 @@
 #define IS_PSEUDO 0x10
 
 static __always_inline __wsum
-generic_checksum(void *new, void *old, int size, __wsum seed) {
+generic_checksum(void *new_val, void *old_val, int size, __wsum seed) {
 
     __wsum csum = 0;
 
-    csum = bpf_csum_diff(old, size, new, size, ~seed);
+    csum = bpf_csum_diff(old_val, size, new_val, size, ~seed);
 
     csum = (csum & 0xffff) + (csum >> 16);
     csum = (csum & 0xffff) + (csum >> 16);
@@ -134,10 +138,7 @@ inet_proto_csum_replace_by_diff(__sum16 *sum, __wsum diff, bool pseudohdr) {
 }
 
 static __always_inline int
-// l4_csum_replace(__sum16 *sum, __be32 old_value, __be32 new_value, __u64
-// flags) {
-l4_csum_replace(__sum16 *sum, __u64 old_value, __u64 new_value, __u64 flags) {
-
+l4_csum_replace(__sum16 *sum, __be32 old_value, __be32 new_value, __u32 flags) {
 
     bool is_pseudo = flags & BPF_F_PSEUDO_HDR;
     bool is_mmzero = flags & BPF_F_MARK_MANGLED_0;

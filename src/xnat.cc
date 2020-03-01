@@ -64,7 +64,7 @@ set_config(int argc, char *const *argv, struct config &cfg) {
                 break;
             case 'h':
                 usage();
-                return ERROR;
+                return SUCCESS;
             case 1:
                 cfg.xdp_flags &= ~XDP_FLAGS_MODES;
                 cfg.xdp_flags |= XDP_FLAGS_DRV_MODE;
@@ -124,7 +124,6 @@ main(int argc, char *const *argv) {
         xnat.init_maps();
 
         xnat.setup_grpc();
-        // xnat.run_grpc_server();
 
         xnat.event_loop();
 
@@ -132,9 +131,13 @@ main(int argc, char *const *argv) {
         err("%s", e.c_str());
     }
 
-    if (config.rm_flag) {
-        xnat.unpin_maps();
-        xnat.detach_bpf_progs();
+    try {
+        if (config.rm_flag) {
+            xnat.unpin_maps();
+            xnat.detach_bpf_progs();
+        }
+    } catch (std::string &e) {
+        err("%s", e.c_str());
     }
     return SUCCESS;
 }
